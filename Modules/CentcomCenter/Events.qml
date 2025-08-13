@@ -11,10 +11,10 @@ Rectangle {
   property date selectedDate: new Date()
   property var selectedDateEvents: []
   property bool hasEvents: selectedDateEvents && selectedDateEvents.length > 0
-  property bool shouldShow: CalendarService && CalendarService.khalAvailable
+  property bool shouldShow: CalendarService && CalendarService.edsAvailable
 
   function updateSelectedDateEvents() {
-    if (CalendarService && CalendarService.khalAvailable) {
+    if (CalendarService && CalendarService.edsAvailable) {
       let events = CalendarService.getEventsForDate(selectedDate)
       selectedDateEvents = events
     } else {
@@ -48,7 +48,7 @@ Rectangle {
       updateSelectedDateEvents()
     }
 
-    function onKhalAvailableChanged() {
+    function onEdsAvailableChanged() {
       updateSelectedDateEvents()
     }
 

@@ -12,7 +12,7 @@ Column {
   property date selectedDate: new Date()
 
   function loadEventsForMonth() {
-    if (!CalendarService || !CalendarService.khalAvailable)
+    if (!CalendarService || !CalendarService.edsAvailable)
       return
 
     let firstDay = new Date(displayDate.getFullYear(),
@@ -37,8 +37,8 @@ Column {
   }
 
   Connections {
-    function onKhalAvailableChanged() {
-      if (CalendarService && CalendarService.khalAvailable)
+    function onEdsAvailableChanged() {
+      if (CalendarService && CalendarService.edsAvailable)
         loadEventsForMonth()
     }
 
@@ -205,7 +205,7 @@ Column {
 
             anchors.fill: parent
             radius: parent.radius
-            visible: CalendarService && CalendarService.khalAvailable
+            visible: CalendarService && CalendarService.edsAvailable
                      && CalendarService.hasEventsForDate(dayDate)
             opacity: {
               if (isSelected)

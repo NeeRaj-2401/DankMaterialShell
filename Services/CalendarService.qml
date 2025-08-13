@@ -1,244 +1,489 @@
 pragma Singleton
-
-pragma ComponentBehavior
+pragma ComponentBehavior: Bound
 
 import QtQuick
 import Quickshell
 import Quickshell.Io
 
 Singleton {
-  id: root
+    id: root
 
-  property bool khalAvailable: false
-  property var eventsByDate: ({})
-  property bool isLoading: false
-  property string lastError: ""
-  property date lastStartDate
-  property date lastEndDate
-
-  function checkKhalAvailability() {
-    if (!khalCheckProcess.running)
-      khalCheckProcess.running = true
-  }
-
-  function loadCurrentMonth() {
-    if (!root.khalAvailable)
-      return
-
-    let today = new Date()
-    let firstDay = new Date(today.getFullYear(), today.getMonth(), 1)
-    let lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0)
-    // Add padding
-    let startDate = new Date(firstDay)
-    startDate.setDate(startDate.getDate() - firstDay.getDay() - 7)
-    let endDate = new Date(lastDay)
-    endDate.setDate(endDate.getDate() + (6 - lastDay.getDay()) + 7)
-    loadEvents(startDate, endDate)
-  }
-
-  function loadEvents(startDate, endDate) {
-    if (!root.khalAvailable) {
-      return
+    property bool edsAvailable: false
+    property bool goaAvailable: false
+    property var eventsByDate: ({})
+    property var calendarSources: ({})
+    property bool isLoading: false
+    property string lastError: ""
+    property date lastStartDate
+    property date lastEndDate
+    property bool servicesRunning: false
+    property var edsServices: ["evolution-source-registry", "evolution-calendar-factory"]
+    property int cacheValidityMinutes: 5
+    property string cacheFile: "/tmp/quickshell_calendar_cache.json"
+    
+    function checkEDSAvailability() {
+        if (!edsCheckProcess.running)
+            edsCheckProcess.running = true
     }
-    if (eventsProcess.running) {
-      return
+
+    function checkGOAAvailability() {
+        if (!goaCheckProcess.running)
+            goaCheckProcess.running = true
     }
-    // Store last requested date range for refresh timer
-    root.lastStartDate = startDate
-    root.lastEndDate = endDate
-    root.isLoading = true
-    // Format dates for khal (MM/dd/yyyy based on printformats)
-    let startDateStr = Qt.formatDate(startDate, "MM/dd/yyyy")
-    let endDateStr = Qt.formatDate(endDate, "MM/dd/yyyy")
-    eventsProcess.requestStartDate = startDate
-    eventsProcess.requestEndDate = endDate
-    eventsProcess.command = ["khal", "list", "--json", "title", "--json", "description", "--json", "start-date", "--json", "start-time", "--json", "end-date", "--json", "end-time", "--json", "all-day", "--json", "location", "--json", "url", startDateStr, endDateStr]
-    eventsProcess.running = true
-  }
 
-  function getEventsForDate(date) {
-    let dateKey = Qt.formatDate(date, "yyyy-MM-dd")
-    return root.eventsByDate[dateKey] || []
-  }
-
-  function hasEventsForDate(date) {
-    let events = getEventsForDate(date)
-    return events.length > 0
-  }
-
-  // Initialize on component completion
-  Component.onCompleted: {
-    checkKhalAvailability()
-  }
-
-  // Process for checking khal configuration
-  Process {
-    id: khalCheckProcess
-
-    command: ["khal", "list", "today"]
-    running: false
-    onExited: exitCode => {
-      root.khalAvailable = (exitCode === 0)
-      if (exitCode === 0) {
-        loadCurrentMonth()
-      }
+    function ensureServicesRunning() {
+        if (!servicesStartProcess.running)
+            servicesStartProcess.running = true
     }
-  }
 
-  // Process for loading events
-  Process {
-    id: eventsProcess
+    function loadCurrentMonth() {
+        if (!root.edsAvailable)
+            return
 
-    property date requestStartDate
-    property date requestEndDate
-    property string rawOutput: ""
+        let today = new Date()
+        let firstDay = new Date(today.getFullYear(), today.getMonth(), 1)
+        let lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0)
+        let startDate = new Date(firstDay)
+        startDate.setDate(startDate.getDate() - firstDay.getDay() - 7)
+        let endDate = new Date(lastDay)
+        endDate.setDate(endDate.getDate() + (6 - lastDay.getDay()) + 7)
+        loadEvents(startDate, endDate)
+    }
 
-    running: false
-    onExited: exitCode => {
-      root.isLoading = false
-      if (exitCode !== 0) {
-        root.lastError = "Failed to load events (exit code: " + exitCode + ")"
-        return
-      }
-      try {
-        let newEventsByDate = {}
-        let lines = eventsProcess.rawOutput.split('\n')
-        for (let line of lines) {
-          line = line.trim()
-          if (!line || line === "[]")
-          continue
+    function loadEvents(startDate, endDate) {
+        if (!root.edsAvailable || !root.servicesRunning) {
+            return
+        }
+        if (eventsProcess.running) {
+            return
+        }
+        
+        if (isCacheValid(startDate, endDate)) {
+            loadFromCache()
+            return
+        }
 
-          // Parse JSON line
-          let dayEvents = JSON.parse(line)
-          // Process each event in this day's array
-          for (let event of dayEvents) {
-            if (!event.title)
-            continue
+        root.lastStartDate = startDate
+        root.lastEndDate = endDate
+        root.isLoading = true
+        
+        let startDateStr = Qt.formatDate(startDate, "yyyy-MM-dd")
+        let endDateStr = Qt.formatDate(endDate, "yyyy-MM-dd")
+        
+        eventsProcess.requestStartDate = startDate
+        eventsProcess.requestEndDate = endDate
+        eventsProcess.command = ["/bin/bash", "-c", 
+            `# Simple EDS Calendar Test
+echo "DEBUG: Testing EDS calendar access for dates ${startDateStr} to ${endDateStr}" >&2
 
-            // Parse start and end dates
-            let startDate, endDate
-            if (event['start-date']) {
-              let startParts = event['start-date'].split('/')
-              startDate = new Date(parseInt(startParts[2]),
-                                   parseInt(startParts[0]) - 1,
-                                   parseInt(startParts[1]))
+# Just try to list available calendar sources
+echo "DEBUG: Available calendar sources:" >&2
+gdbus call --session \\
+    --dest org.gnome.evolution.dataserver.Sources5 \\
+    --object-path /org/gnome/evolution/dataserver/SourceManager \\
+    --method org.freedesktop.DBus.ObjectManager.GetManagedObjects \\
+    2>/dev/null | grep -o "'/org/gnome/evolution/dataserver/SourceManager/Source[^']*'" | head -5 >&2
+
+# Test opening the local Personal calendar
+echo "DEBUG: Testing calendar access..." >&2
+CALENDAR_INFO=$(gdbus call --session \\
+    --dest org.gnome.evolution.dataserver.Calendar8 \\
+    --object-path /org/gnome/evolution/dataserver/CalendarFactory \\
+    --method org.gnome.evolution.dataserver.CalendarFactory.OpenCalendar \\
+    "system-calendar" 2>/dev/null)
+
+if [ -n "$CALENDAR_INFO" ]; then
+    echo "DEBUG: Calendar opened successfully: $CALENDAR_INFO" >&2
+    OBJECT_PATH=$(echo "$CALENDAR_INFO" | grep -o "'/[^']*'" | head -1 | tr -d "'")
+    BUS_NAME=$(echo "$CALENDAR_INFO" | grep -o "'org\\.gnome\\.evolution\\.dataserver\\.Calendar[0-9]*'" | tr -d "'")
+    
+    if [ -n "$OBJECT_PATH" ] && [ -n "$BUS_NAME" ]; then
+        echo "DEBUG: Querying events from $OBJECT_PATH on $BUS_NAME" >&2
+        SEXP="(occur-in-time-range? (make-time \\"${startDateStr}T000000Z\\") (make-time \\"${endDateStr}T235959Z\\"))"
+        EVENTS=$(gdbus call --session \\
+            --dest "$BUS_NAME" \\
+            --object-path "$OBJECT_PATH" \\
+            --method org.gnome.evolution.dataserver.Calendar.GetObjectList \\
+            "$SEXP" 2>&1)
+        echo "DEBUG: Query result: $EVENTS" >&2
+        echo "[]"  # Return empty array for now
+    else
+        echo "DEBUG: Failed to parse calendar info" >&2
+        echo "[]"
+    fi
+else
+    echo "DEBUG: Failed to open calendar" >&2
+    echo "[]"
+fi
+`]
+        eventsProcess.running = true
+    }
+
+    function isCacheValid(startDate, endDate) {
+        return false // Disable cache for now during development
+    }
+
+    function loadFromCache() {
+        // Cache loading implementation
+    }
+
+    function saveToCache(events) {
+        // Cache saving implementation
+    }
+
+    function getEventsForDate(date) {
+        let dateKey = Qt.formatDate(date, "yyyy-MM-dd")
+        return root.eventsByDate[dateKey] || []
+    }
+
+    function hasEventsForDate(date) {
+        let events = getEventsForDate(date)
+        return events.length > 0
+    }
+
+    function refreshCalendars() {
+        if (root.edsAvailable && root.servicesRunning) {
+            if (root.lastStartDate && root.lastEndDate) {
+                loadEvents(root.lastStartDate, root.lastEndDate)
             } else {
-              startDate = new Date()
+                loadCurrentMonth()
             }
-            if (event['end-date']) {
-              let endParts = event['end-date'].split('/')
-              endDate = new Date(parseInt(endParts[2]),
-                                 parseInt(endParts[0]) - 1,
-                                 parseInt(endParts[1]))
+        }
+    }
+
+    function createEvent(title, startDate, endDate, description, location) {
+        if (!root.edsAvailable) {
+            console.warn("EDS not available for event creation")
+            return false
+        }
+        
+        if (!createEventProcess.running) {
+            let startIso = startDate.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z'
+            let endIso = endDate.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z'
+            let uid = "quickshell-" + Date.now() + "-" + Math.random().toString(36).substr(2, 9)
+            
+            let icalEvent = `BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Quickshell//Calendar Service//EN
+BEGIN:VEVENT
+UID:${uid}
+DTSTART:${startIso}
+DTEND:${endIso}
+SUMMARY:${title}
+DESCRIPTION:${description || ''}
+LOCATION:${location || ''}
+CREATED:${new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z'}
+LAST-MODIFIED:${new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z'}
+END:VEVENT
+END:VCALENDAR`
+            
+            createEventProcess.eventData = icalEvent
+            createEventProcess.running = true
+        }
+        return true
+    }
+
+    function listCalendarAccounts() {
+        if (!goaListProcess.running) {
+            goaListProcess.running = true
+        }
+    }
+
+    Component.onCompleted: {
+        console.log("CalendarService: Starting initialization...")
+        ensureServicesRunning()
+        checkEDSAvailability()
+        checkGOAAvailability()
+    }
+
+    Timer {
+        id: refreshTimer
+        interval: root.cacheValidityMinutes * 60 * 1000
+        running: root.edsAvailable && root.servicesRunning
+        repeat: true
+        onTriggered: refreshCalendars()
+    }
+
+    Process {
+        id: servicesStartProcess
+        
+        command: ["bash", "-c", "systemctl --user start evolution-source-registry.service evolution-calendar-factory.service"]
+        running: false
+        onExited: exitCode => {
+            root.servicesRunning = (exitCode === 0)
+            if (exitCode === 0) {
+                checkEDSAvailability()
             } else {
-              endDate = new Date(startDate)
+                console.warn("Failed to start EDS services:", exitCode)
             }
-            // Create start/end times
-            let startTime = new Date(startDate)
-            let endTime = new Date(endDate)
-            if (event['start-time'] && event['all-day'] !== "True") {
-              // Parse time if available and not all-day
-              let timeStr = event['start-time']
-              if (timeStr) {
-                let timeParts = timeStr.match(/(\d+):(\d+)/)
-                if (timeParts) {
-                  startTime.setHours(parseInt(timeParts[1]),
-                                     parseInt(timeParts[2]))
-                  if (event['end-time']) {
-                    let endTimeParts = event['end-time'].match(/(\d+):(\d+)/)
-                    if (endTimeParts)
-                    endTime.setHours(parseInt(endTimeParts[1]),
-                                     parseInt(endTimeParts[2]))
-                  } else {
-                    // Default to 1 hour duration on same day
-                    endTime = new Date(startTime)
-                    endTime.setHours(startTime.getHours() + 1)
-                  }
+        }
+    }
+
+    Process {
+        id: edsCheckProcess
+
+        command: ["bash", "-c", "systemctl --user is-active evolution-source-registry.service && systemctl --user is-active evolution-calendar-factory.service"]
+        running: false
+        onExited: exitCode => {
+            root.edsAvailable = (exitCode === 0)
+            console.log("CalendarService: EDS availability check result:", exitCode === 0 ? "available" : "not available")
+            if (exitCode === 0) {
+                console.log("CalendarService: Loading current month...")
+                loadCurrentMonth()
+            } else {
+                console.warn("EDS services not running:", exitCode)
+            }
+        }
+    }
+
+    Process {
+        id: goaCheckProcess
+
+        command: ["bash", "-c", "systemctl --user is-active goa-daemon.service || pgrep -f goa-daemon"]
+        running: false
+        onExited: exitCode => {
+            root.goaAvailable = (exitCode === 0)
+            if (exitCode !== 0) {
+                console.warn("GOA daemon not running, calendar accounts may not sync")
+            }
+        }
+    }
+
+    Process {
+        id: eventsProcess
+
+        property date requestStartDate
+        property date requestEndDate
+        property string rawOutput: ""
+
+        running: false
+        onExited: exitCode => {
+            root.isLoading = false
+            if (exitCode !== 0) {
+                root.lastError = "Failed to load events from EDS (exit code: " + exitCode + ")"
+                console.warn("EDS calendar query failed:", exitCode)
+                return
+            }
+            
+            try {
+                let newEventsByDate = {}
+                let outputLines = eventsProcess.rawOutput.trim().split('\n')
+                
+                for (let line of outputLines) {
+                    line = line.trim()
+                    if (!line || line === "[]" || line === "")
+                        continue
+
+                    let events = JSON.parse(line)
+                    if (!Array.isArray(events))
+                        continue
+
+                    for (let event of events) {
+                        if (!event.id || !event.title)
+                            continue
+
+                        let startDate = parseEventDate(event.start)
+                        let endDate = parseEventDate(event.end) || startDate
+                        
+                        let eventTemplate = {
+                            "id": event.id,
+                            "title": event.title || "Untitled Event",
+                            "start": startDate,
+                            "end": endDate,
+                            "location": event.location || "",
+                            "description": event.description || "",
+                            "url": event.url || "",
+                            "calendar": event.calendar || "Default",
+                            "color": event.color || "#1976d2",
+                            "allDay": event.allDay || false,
+                            "isMultiDay": startDate.toDateString() !== endDate.toDateString()
+                        }
+
+                        let currentDate = new Date(startDate)
+                        while (currentDate <= endDate) {
+                            let dateKey = Qt.formatDate(currentDate, "yyyy-MM-dd")
+                            if (!newEventsByDate[dateKey])
+                                newEventsByDate[dateKey] = []
+
+                            let existingEvent = newEventsByDate[dateKey].find(e => e.id === event.id)
+                            if (!existingEvent) {
+                                let dayEvent = Object.assign({}, eventTemplate)
+                                
+                                if (currentDate.getTime() === startDate.getTime()) {
+                                    dayEvent.start = new Date(startDate)
+                                } else {
+                                    dayEvent.start = new Date(currentDate)
+                                    if (!dayEvent.allDay)
+                                        dayEvent.start.setHours(0, 0, 0, 0)
+                                }
+                                
+                                if (currentDate.getTime() === endDate.getTime()) {
+                                    dayEvent.end = new Date(endDate)
+                                } else {
+                                    dayEvent.end = new Date(currentDate)
+                                    if (!dayEvent.allDay)
+                                        dayEvent.end.setHours(23, 59, 59, 999)
+                                }
+                                
+                                newEventsByDate[dateKey].push(dayEvent)
+                            }
+                            
+                            currentDate.setDate(currentDate.getDate() + 1)
+                        }
+                    }
                 }
-              }
-            }
-            // Create unique ID for this event (to track multi-day events)
-            let eventId = event.title + "_" + event['start-date'] + "_" + (event['start-time']
-                                                                           || 'allday')
-            // Create event object template
-            let eventTemplate = {
-              "id": eventId,
-              "title": event.title || "Untitled Event",
-              "start": startTime,
-              "end": endTime,
-              "location": event.location || "",
-              "description": event.description || "",
-              "url": event.url || "",
-              "calendar": "",
-              "color": "",
-              "allDay": event['all-day'] === "True",
-              "isMultiDay": startDate.toDateString() !== endDate.toDateString()
-            }
-            // Add event to each day it spans
-            let currentDate = new Date(startDate)
-            while (currentDate <= endDate) {
-              let dateKey = Qt.formatDate(currentDate, "yyyy-MM-dd")
-              if (!newEventsByDate[dateKey])
-              newEventsByDate[dateKey] = []
 
-              // Check if this exact event is already added to this date (prevent duplicates)
-              let existingEvent = newEventsByDate[dateKey].find(e => {
-                                                                  return e.id === eventId
-                                                                })
-              if (existingEvent) {
-                // Move to next day without adding duplicate
-                currentDate.setDate(currentDate.getDate() + 1)
-                continue
-              }
-              // Create a copy of the event for this date
-              let dayEvent = Object.assign({}, eventTemplate)
-              // For multi-day events, adjust the display time for this specific day
-              if (currentDate.getTime() === startDate.getTime()) {
-                // First day - use original start time
-                dayEvent.start = new Date(startTime)
-              } else {
-                // Subsequent days - start at beginning of day for all-day events
-                dayEvent.start = new Date(currentDate)
-                if (!dayEvent.allDay)
-                dayEvent.start.setHours(0, 0, 0, 0)
-              }
-              if (currentDate.getTime() === endDate.getTime()) {
-                // Last day - use original end time
-                dayEvent.end = new Date(endTime)
-              } else {
-                // Earlier days - end at end of day for all-day events
-                dayEvent.end = new Date(currentDate)
-                if (!dayEvent.allDay)
-                dayEvent.end.setHours(23, 59, 59, 999)
-              }
-              newEventsByDate[dateKey].push(dayEvent)
-              // Move to next day
-              currentDate.setDate(currentDate.getDate() + 1)
+                for (let dateKey in newEventsByDate) {
+                    newEventsByDate[dateKey].sort((a, b) => {
+                        return a.start.getTime() - b.start.getTime()
+                    })
+                }
+                
+                root.eventsByDate = newEventsByDate
+                root.lastError = ""
+                saveToCache(newEventsByDate)
+                
+            } catch (error) {
+                root.lastError = "Failed to parse EDS events: " + error.toString()
+                console.error("Calendar parsing error:", error.toString())
+                root.eventsByDate = {}
             }
-          }
+            
+            eventsProcess.rawOutput = ""
         }
-        // Sort events by start time within each date
-        for (let dateKey in newEventsByDate) {
-          newEventsByDate[dateKey].sort((a, b) => {
-                                          return a.start.getTime(
-                                            ) - b.start.getTime()
-                                        })
+
+        function parseEventDate(dateStr) {
+            if (!dateStr) return new Date()
+            
+            if (dateStr instanceof Date) return dateStr
+            
+            if (typeof dateStr === 'string') {
+                if (dateStr.includes('T')) {
+                    return new Date(dateStr)
+                } else {
+                    let parts = dateStr.split('-')
+                    if (parts.length === 3) {
+                        return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]))
+                    }
+                }
+            }
+            
+            return new Date()
         }
-        root.eventsByDate = newEventsByDate
-        root.lastError = ""
-      } catch (error) {
-        root.lastError = "Failed to parse events JSON: " + error.toString()
-        root.eventsByDate = {}
-      }
-      // Reset for next run
-      eventsProcess.rawOutput = ""
+
+        stdout: SplitParser {
+            splitMarker: "\n"
+            onRead: data => {
+                eventsProcess.rawOutput += data + "\n"
+            }
+        }
     }
 
-    stdout: SplitParser {
-      splitMarker: "\n"
-      onRead: data => {
-        eventsProcess.rawOutput += data + "\n"
-      }
+    Process {
+        id: createEventProcess
+        
+        property string eventData: ""
+        
+        command: ["bash", "-c", `
+            # Create event in system calendar
+            echo "DEBUG: Creating event with data: ${eventData}" >&2
+            
+            # First open the calendar
+            CALENDAR_INFO=$(gdbus call --session \\
+                --dest org.gnome.evolution.dataserver.Calendar8 \\
+                --object-path /org/gnome/evolution/dataserver/CalendarFactory \\
+                --method org.gnome.evolution.dataserver.CalendarFactory.OpenCalendar \\
+                "system-calendar" 2>/dev/null)
+            
+            if [ -n "$CALENDAR_INFO" ]; then
+                OBJECT_PATH=$(echo "$CALENDAR_INFO" | grep -o "'/[^']*'" | head -1 | tr -d "'")
+                BUS_NAME=$(echo "$CALENDAR_INFO" | grep -o "'org\\.gnome\\.evolution\\.dataserver\\.Calendar[0-9]*'" | tr -d "'")
+                
+                echo "DEBUG: Creating event on $BUS_NAME at $OBJECT_PATH" >&2
+                
+                # CreateObjects expects an array of iCalendar strings
+                gdbus call --session \\
+                    --dest "$BUS_NAME" \\
+                    --object-path "$OBJECT_PATH" \\
+                    --method org.gnome.evolution.dataserver.Calendar.CreateObjects \\
+                    "['${eventData}']" \\
+                    "0"
+            else
+                echo "DEBUG: Failed to open calendar for event creation" >&2
+                exit 1
+            fi
+        `]
+        running: false
+        onExited: exitCode => {
+            if (exitCode === 0) {
+                console.log("Event created successfully")
+                refreshCalendars()
+            } else {
+                console.warn("Failed to create event:", exitCode)
+            }
+        }
     }
-  }
+
+    Process {
+        id: goaListProcess
+        
+        command: ["bash", "-c", `
+            # List GOA accounts
+            gdbus call --session \\
+                --dest org.gnome.OnlineAccounts \\
+                --object-path /org/gnome/OnlineAccounts/Manager \\
+                --method org.freedesktop.DBus.ObjectManager.GetManagedObjects 2>/dev/null | \\
+            python3 -c "
+import sys
+import json
+import re
+
+try:
+    input_data = sys.stdin.read()
+    accounts = []
+    
+    # Extract account information from D-Bus output
+    account_blocks = re.findall(r'/org/gnome/OnlineAccounts/Accounts/[^}]+', input_data)
+    
+    for block in account_blocks:
+        if 'Calendar' in block:
+            account = {}
+            if 'ProviderType' in block:
+                provider_match = re.search(r'ProviderType.*?[\"']([^\"']+)', block)
+                if provider_match:
+                    account['provider'] = provider_match.group(1)
+            
+            if 'PresentationIdentity' in block:
+                identity_match = re.search(r'PresentationIdentity.*?[\"']([^\"']+)', block)
+                if identity_match:
+                    account['identity'] = identity_match.group(1)
+            
+            if account:
+                accounts.append(account)
+    
+    print(json.dumps(accounts))
+except:
+    print('[]')
+"
+        `]
+        running: false
+        onExited: exitCode => {
+            if (exitCode === 0) {
+                try {
+                    let accounts = JSON.parse(goaListProcess.output)
+                    console.log("Found calendar accounts:", JSON.stringify(accounts))
+                } catch (e) {
+                    console.warn("Failed to parse GOA accounts")
+                }
+            }
+        }
+        
+        property string output: ""
+        stdout: SplitParser {
+            splitMarker: "\n"
+            onRead: data => {
+                goaListProcess.output += data + "\n"
+            }
+        }
+    }
 }

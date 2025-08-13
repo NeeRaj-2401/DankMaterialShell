@@ -83,7 +83,7 @@ PanelWindow {
       let calendarHeight = 300
       let mainRowHeight = Math.max(widgetHeight, calendarHeight)
       contentHeight += mainRowHeight + Theme.spacingM
-      if (CalendarService && CalendarService.khalAvailable) {
+      if (CalendarService && CalendarService.edsAvailable) {
         let hasEvents = events.selectedDateEvents
             && events.selectedDateEvents.length > 0
         let eventsHeight = hasEvents ? Math.min(
@@ -145,7 +145,7 @@ PanelWindow {
           mainContainer.height = mainContainer.calculateHeight()
       }
 
-      function onKhalAvailableChanged() {
+      function onEdsAvailableChanged() {
         if (mainContainer.opacity === 1)
           mainContainer.height = mainContainer.calculateHeight()
       }

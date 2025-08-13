@@ -73,46 +73,35 @@ Singleton {
         eventsProcess.requestStartDate = startDate
         eventsProcess.requestEndDate = endDate
         eventsProcess.command = ["/bin/bash", "-c", 
-            `# Simple EDS Calendar Test
-echo "DEBUG: Testing EDS calendar access for dates ${startDateStr} to ${endDateStr}" >&2
-
-# Just try to list available calendar sources
-echo "DEBUG: Available calendar sources:" >&2
-gdbus call --session \\
-    --dest org.gnome.evolution.dataserver.Sources5 \\
-    --object-path /org/gnome/evolution/dataserver/SourceManager \\
-    --method org.freedesktop.DBus.ObjectManager.GetManagedObjects \\
-    2>/dev/null | grep -o "'/org/gnome/evolution/dataserver/SourceManager/Source[^']*'" | head -5 >&2
-
-# Test opening the local Personal calendar
-echo "DEBUG: Testing calendar access..." >&2
+            `# Load calendar events from Evolution Data Server
 CALENDAR_INFO=$(gdbus call --session \\
     --dest org.gnome.evolution.dataserver.Calendar8 \\
     --object-path /org/gnome/evolution/dataserver/CalendarFactory \\
     --method org.gnome.evolution.dataserver.CalendarFactory.OpenCalendar \\
     "system-calendar" 2>/dev/null)
 
-if [ -n "$CALENDAR_INFO" ]; then
-    echo "DEBUG: Calendar opened successfully: $CALENDAR_INFO" >&2
+if [ -n "$CALENDAR_INFO" ] && [[ "$CALENDAR_INFO" != *"Error:"* ]]; then
     OBJECT_PATH=$(echo "$CALENDAR_INFO" | grep -o "'/[^']*'" | head -1 | tr -d "'")
     BUS_NAME=$(echo "$CALENDAR_INFO" | grep -o "'org\\.gnome\\.evolution\\.dataserver\\.Calendar[0-9]*'" | tr -d "'")
     
     if [ -n "$OBJECT_PATH" ] && [ -n "$BUS_NAME" ]; then
-        echo "DEBUG: Querying events from $OBJECT_PATH on $BUS_NAME" >&2
-        SEXP="(occur-in-time-range? (make-time \\"${startDateStr}T000000Z\\") (make-time \\"${endDateStr}T235959Z\\"))"
         EVENTS=$(gdbus call --session \\
             --dest "$BUS_NAME" \\
             --object-path "$OBJECT_PATH" \\
             --method org.gnome.evolution.dataserver.Calendar.GetObjectList \\
-            "$SEXP" 2>&1)
-        echo "DEBUG: Query result: $EVENTS" >&2
-        echo "[]"  # Return empty array for now
+            "#t" 2>/dev/null)
+        
+        if [[ "$EVENTS" != *"@as []"* ]] && [ -n "$EVENTS" ]; then
+            export START_DATE="${startDateStr}"
+            export END_DATE="${endDateStr}"
+            echo "$EVENTS" | go run parse_calendar_events.go
+        else
+            echo "[]"
+        fi
     else
-        echo "DEBUG: Failed to parse calendar info" >&2
         echo "[]"
     fi
 else
-    echo "DEBUG: Failed to open calendar" >&2
     echo "[]"
 fi
 `]
@@ -190,7 +179,6 @@ END:VCALENDAR`
     }
 
     Component.onCompleted: {
-        console.log("CalendarService: Starting initialization...")
         ensureServicesRunning()
         checkEDSAvailability()
         checkGOAAvailability()
@@ -226,12 +214,9 @@ END:VCALENDAR`
         running: false
         onExited: exitCode => {
             root.edsAvailable = (exitCode === 0)
-            console.log("CalendarService: EDS availability check result:", exitCode === 0 ? "available" : "not available")
             if (exitCode === 0) {
-                console.log("CalendarService: Loading current month...")
+                root.servicesRunning = true
                 loadCurrentMonth()
-            } else {
-                console.warn("EDS services not running:", exitCode)
             }
         }
     }
@@ -261,7 +246,6 @@ END:VCALENDAR`
             root.isLoading = false
             if (exitCode !== 0) {
                 root.lastError = "Failed to load events from EDS (exit code: " + exitCode + ")"
-                console.warn("EDS calendar query failed:", exitCode)
                 return
             }
             
@@ -345,7 +329,6 @@ END:VCALENDAR`
                 
             } catch (error) {
                 root.lastError = "Failed to parse EDS events: " + error.toString()
-                console.error("Calendar parsing error:", error.toString())
                 root.eventsByDate = {}
             }
             
@@ -416,10 +399,7 @@ END:VCALENDAR`
         running: false
         onExited: exitCode => {
             if (exitCode === 0) {
-                console.log("Event created successfully")
                 refreshCalendars()
-            } else {
-                console.warn("Failed to create event:", exitCode)
             }
         }
     }
@@ -471,9 +451,8 @@ except:
             if (exitCode === 0) {
                 try {
                     let accounts = JSON.parse(goaListProcess.output)
-                    console.log("Found calendar accounts:", JSON.stringify(accounts))
                 } catch (e) {
-                    console.warn("Failed to parse GOA accounts")
+                    // Ignore parsing errors
                 }
             }
         }

@@ -41,7 +41,8 @@ Rectangle {
     console.log("Events: CalendarService available:", CalendarService !== null && CalendarService !== undefined)
     if (CalendarService) {
       console.log("Events: CalendarService.edsAvailable:", CalendarService.edsAvailable)
-      console.log("Events: CalendarService.initialized:", CalendarService.initialized)
+      console.log("Events: CalendarService.allEvents length:", CalendarService.allEvents ? CalendarService.allEvents.length : "undefined")
+      console.log("Events: CalendarService.eventsByDate keys:", Object.keys(CalendarService.eventsByDate))
     }
     updateSelectedDateEvents()
   }

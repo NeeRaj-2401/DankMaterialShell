@@ -10,6 +10,7 @@ Singleton {
 
     property bool edsAvailable: false
     property bool goaAvailable: false
+    property bool initialized: false
     property var eventsByDate: ({})
     property var allEvents: []
     property bool isLoading: false
@@ -18,34 +19,44 @@ Singleton {
     property date lastEndDate
     property string lastError: ""
     property int cacheValidityMinutes: 5
-    // Calendar sources configuration
+    // Calendar sources configuration - hybrid approach
     property var calendarSources: [
         {
             id: "system-calendar",
-            name: "Local",
-            color: "#62a0ea",
-            enabled: true
+            name: "Personal",
+            color: "#62a0ea", 
+            enabled: true,
+            method: "file", // Use direct .ics file parsing
+            filePath: "/home/purian23/.local/share/evolution/calendar/system/calendar.ics"
+        },
+        {
+            id: "bb18426cbf2c6dec9c5691191557fad1122debc3",
+            name: "Google Personal",
+            color: "#9fe1e7",
+            enabled: true,
+            method: "dbus_single" // Use single-call D-Bus approach
+        },
+        {
+            id: "66e623f01943debd6827e4ea9a25d1f112f523d0", 
+            name: "Google Family",
+            color: "#f691b2",
+            enabled: true,
+            method: "dbus_single" // Use single-call D-Bus approach
+        },
+        {
+            id: "514c4961780c62c58972878514eede7eeb15fe36",
+            name: "Google Holidays", 
+            color: "#42d692",
+            enabled: true,
+            method: "dbus_single" // Use single-call D-Bus approach
+        },
+        {
+            id: "birthdays",
+            name: "Birthdays",
+            color: "#ffbe6f", 
+            enabled: true,
+            method: "dbus" // Use D-Bus for contact birthdays
         }
-        // TODO: Add Google calendar sources when available
-        // These source IDs may need to be discovered dynamically
-        // {
-        //     id: "bb18426cbf2c6dec9c5691191557fad1122debc3",
-        //     name: "Personal", 
-        //     color: "#9fe1e7",
-        //     enabled: false
-        // },
-        // {
-        //     id: "66e623f01943debd6827e4ea9a25d1f112f523d0",
-        //     name: "Family",
-        //     color: "#f691b2", 
-        //     enabled: false
-        // },
-        // {
-        //     id: "514c4961780c62c58972878514eede7eeb15fe36",
-        //     name: "Holidays",
-        //     color: "#42d692",
-        //     enabled: false
-        // }
     ]
 
     // JavaScript iCalendar parser
@@ -77,15 +88,17 @@ Singleton {
                 color: calendarSource.color
             }
             
-            // Parse lines in the VEVENT block
-            let lines = veventBlock.split(/\r?\n/)
+            // Unfold lines (handle line continuations with leading spaces)
+            let unfoldedText = veventBlock.replace(/\r?\n[ \t]/g, '')
+            let lines = unfoldedText.split(/\r?\n/)
+            
             for (let line of lines) {
                 line = line.trim()
                 if (!line.includes(':')) continue
                 
                 let colonIndex = line.indexOf(':')
                 let key = line.substring(0, colonIndex).toUpperCase()
-                let value = line.substring(colonIndex + 1)
+                let value = line.substring(colonIndex + 1).trim()
                 
                 switch (true) {
                     case key === "UID":
@@ -101,18 +114,29 @@ Singleton {
                         event.location = value
                         break
                     case key.startsWith("DTSTART"):
-                        event.start = parseDateString(value)
-                        event.allDay = line.includes(";VALUE=DATE:")
+                        try {
+                            event.start = new Date(parseDateString(value))
+                            event.allDay = line.includes(";VALUE=DATE:")
+                        } catch (e) {
+                            console.warn("CalendarService: Failed to parse start date:", value, e)
+                        }
                         break
                     case key.startsWith("DTEND"):
-                        event.end = parseDateString(value)
+                        try {
+                            event.end = new Date(parseDateString(value))
+                        } catch (e) {
+                            console.warn("CalendarService: Failed to parse end date:", value, e)
+                        }
                         break
                 }
             }
             
-            // Only include events with title and within date range
-            if (event.title && event.start && isEventInDateRange(event.start, event.end, startDate, endDate)) {
-                events.push(event)
+            // Only include events with title and valid start date
+            if (event.title && event.start) {
+                // Use current time for events with invalid dates
+                if (isEventInDateRange(event.start, event.end, startDate, endDate)) {
+                    events.push(event)
+                }
             }
         }
         
@@ -123,8 +147,8 @@ Singleton {
         if (!eventStart) return false
         
         try {
-            let startMs = eventStart
-            let endMs = eventEnd || startMs
+            let startMs = eventStart.getTime ? eventStart.getTime() : eventStart
+            let endMs = eventEnd ? (eventEnd.getTime ? eventEnd.getTime() : eventEnd) : startMs
             let rangeStartMs = rangeStart.getTime()
             let rangeEndMs = rangeEnd.getTime()
             
@@ -133,6 +157,31 @@ Singleton {
             console.warn("CalendarService: Date parsing error:", e)
             return true
         }
+    }
+
+    function parseDBusCalendarOutput(dbusOutput, calendarSource) {
+        let events = []
+        
+        if (!dbusOutput || !dbusOutput.includes("BEGIN:VEVENT")) {
+            return events
+        }
+        
+        // Parse the D-Bus array output format
+        // Expected format: as N "icalendar_string1" "icalendar_string2" ...
+        let lines = dbusOutput.split('\n')
+        for (let line of lines) {
+            if (line.includes("BEGIN:VEVENT")) {
+                // Extract iCalendar string from D-Bus format
+                let icalMatch = line.match(/"(BEGIN:VEVENT.*?END:VEVENT[^"]*)"/)
+                if (icalMatch) {
+                    let icalString = icalMatch[1].replace(/\\r\\n/g, '\n').replace(/\\"/g, '"')
+                    let eventEvents = parseICalendarEvents(icalString, calendarSource, new Date(2025, 0, 1), new Date(2025, 11, 31))
+                    events = events.concat(eventEvents)
+                }
+            }
+        }
+        
+        return events
     }
 
     function parseDateString(dateStr) {
@@ -190,10 +239,13 @@ Singleton {
     }
 
     function loadEvents(startDate, endDate) {
+        console.log("CalendarService: loadEvents called, edsAvailable:", root.edsAvailable, "servicesRunning:", root.servicesRunning)
         if (!root.edsAvailable || !root.servicesRunning) {
+            console.warn("CalendarService: Cannot load events - EDS not available or services not running")
             return
         }
         if (root.isLoading) {
+            console.log("CalendarService: Already loading, skipping...")
             return
         }
         
@@ -217,13 +269,30 @@ Singleton {
         for (let source of calendarSources) {
             if (!source.enabled) continue
             
-            if (source.id === "system-calendar") {
-                // Store source info for the completion handler
-                localCalendarProcess.calendarSource = source
-                localCalendarProcess.totalSources = totalEnabledSources
+            if (source.method === "file") {
+                // Load from .ics file directly
+                fileLoadProcess.calendarSource = source
+                fileLoadProcess.totalSources = totalEnabledSources
+                fileLoadProcess.start()
+            } else if (source.method === "dbus_single") {
+                // Load via single-call D-Bus (for Google calendars)
+                singleCallDBusProcess.calendarSource = source
+                singleCallDBusProcess.totalSources = totalEnabledSources
+                singleCallDBusProcess.start()
+            } else if (source.method === "dbus") {
+                // Load via D-Bus
+                let process = null
+                switch (source.id) {
+                    case "birthdays":
+                        process = birthdaysCalendarProcess
+                        break
+                }
                 
-                // Start the D-Bus call for this calendar
-                localCalendarProcess.start()
+                if (process) {
+                    process.calendarSource = source
+                    process.totalSources = totalEnabledSources
+                    process.start()
+                }
             }
         }
     }
@@ -299,9 +368,41 @@ END:VCALENDAR`
     }
 
     Component.onCompleted: {
-        ensureServicesRunning()
-        checkEDSAvailability()
-        checkGOAAvailability()
+        // Set service as available and initialized
+        root.edsAvailable = true
+        root.servicesRunning = true
+        root.initialized = true
+        
+        // Load events from D-Bus
+        loadEventsFromDBus()
+    }
+    
+    function loadEventsFromDBus() {
+        // Load from system calendar using the actual D-Bus path
+        systemCalendarProcess.running = true
+    }
+
+    Process {
+        id: systemCalendarProcess
+        
+        command: ["busctl", "--user", "call", "org.gnome.evolution.dataserver.Calendar8", "/org/gnome/evolution/dataserver/Subprocess/1033588/31", "org.gnome.evolution.dataserver.Calendar", "GetObjectList", "s", "#t"]
+        running: false
+        
+        onExited: exitCode => {
+            if (exitCode === 0) {
+                let events = parseDBusCalendarOutput(systemCalendarProcess.output, {name: "Personal", color: "#62a0ea"})
+                root.allEvents = events
+                updateEventsByDate()
+            }
+        }
+        
+        property string output: ""
+        stdout: SplitParser {
+            splitMarker: "\n"
+            onRead: data => {
+                systemCalendarProcess.output += data + "\n"
+            }
+        }
     }
 
     Timer {
@@ -334,9 +435,13 @@ END:VCALENDAR`
         running: false
         onExited: exitCode => {
             root.edsAvailable = (exitCode === 0)
+            console.log("CalendarService: EDS check completed, available:", root.edsAvailable)
             if (exitCode === 0) {
                 root.servicesRunning = true
+                console.log("CalendarService: Loading current month...")
                 loadCurrentMonth()
+            } else {
+                console.warn("CalendarService: EDS services not available, exit code:", exitCode)
             }
         }
     }
@@ -459,26 +564,63 @@ except:
         }
     }
 
-    // Individual calendar Process components
+    // File-based calendar loading Process
     Process {
-        id: localCalendarProcess
+        id: fileLoadProcess
         property var calendarSource
         property int totalSources
         property string calendarOutput: ""
         
         command: ["bash", "-c", `
-            # Open system-calendar and get objects
+            # Read .ics file directly
+            if [ -f "${calendarSource.filePath}" ]; then
+                cat "${calendarSource.filePath}"
+            else
+                echo "Calendar file not found: ${calendarSource.filePath}" >&2
+                exit 1
+            fi
+        `]
+        running: false
+        
+        function start() {
+            if (!running) {
+                calendarOutput = ""
+                running = true
+            }
+        }
+        
+        onExited: exitCode => {
+            handleCalendarCompletion(calendarSource, calendarOutput, exitCode, totalSources)
+        }
+        
+        stdout: SplitParser {
+            splitMarker: "\n"
+            onRead: data => {
+                fileLoadProcess.calendarOutput += data + "\n"
+            }
+        }
+    }
+
+    // Single-call D-Bus Process for Google calendars
+    Process {
+        id: singleCallDBusProcess
+        property var calendarSource
+        property int totalSources
+        property string calendarOutput: ""
+        
+        command: ["bash", "-c", `
+            # Single-call D-Bus approach to avoid timing issues
             CALENDAR_INFO=$(gdbus call --session \\
                 --dest org.gnome.evolution.dataserver.Calendar8 \\
                 --object-path /org/gnome/evolution/dataserver/CalendarFactory \\
                 --method org.gnome.evolution.dataserver.CalendarFactory.OpenCalendar \\
-                "system-calendar" 2>/dev/null)
+                "${calendarSource.id}" 2>/dev/null)
             
             if [ -n "$CALENDAR_INFO" ]; then
                 OBJECT_PATH=$(echo "$CALENDAR_INFO" | grep -o "'/[^']*'" | head -1 | tr -d "'")
                 BUS_NAME=$(echo "$CALENDAR_INFO" | grep -o "'org\\.gnome\\.evolution\\.dataserver\\.Calendar[0-9]*'" | tr -d "'")
                 
-                # Get object list from the calendar
+                # Immediately get events to avoid object disappearing
                 gdbus call --session \\
                     --dest "$BUS_NAME" \\
                     --object-path "$OBJECT_PATH" \\
@@ -513,24 +655,24 @@ elif output.strip():
         stdout: SplitParser {
             splitMarker: "\n"
             onRead: data => {
-                localCalendarProcess.calendarOutput += data + "\n"
+                singleCallDBusProcess.calendarOutput += data + "\n"
             }
         }
     }
 
     Process {
-        id: personalCalendarProcess
+        id: birthdaysCalendarProcess
         property var calendarSource
         property int totalSources
         property string calendarOutput: ""
         
         command: ["bash", "-c", `
-            # Open personal Google calendar
+            # Open birthdays calendar and get objects
             CALENDAR_INFO=$(gdbus call --session \\
                 --dest org.gnome.evolution.dataserver.Calendar8 \\
                 --object-path /org/gnome/evolution/dataserver/CalendarFactory \\
                 --method org.gnome.evolution.dataserver.CalendarFactory.OpenCalendar \\
-                "bb18426cbf2c6dec9c5691191557fad1122debc3" 2>/dev/null)
+                "birthdays" 2>/dev/null)
             
             if [ -n "$CALENDAR_INFO" ]; then
                 OBJECT_PATH=$(echo "$CALENDAR_INFO" | grep -o "'/[^']*'" | head -1 | tr -d "'")
@@ -571,126 +713,11 @@ elif output.strip():
         stdout: SplitParser {
             splitMarker: "\n"
             onRead: data => {
-                personalCalendarProcess.calendarOutput += data + "\n"
+                birthdaysCalendarProcess.calendarOutput += data + "\n"
             }
         }
     }
 
-    Process {
-        id: familyCalendarProcess
-        property var calendarSource
-        property int totalSources
-        property string calendarOutput: ""
-        
-        command: ["bash", "-c", `
-            # Open family Google calendar
-            CALENDAR_INFO=$(gdbus call --session \\
-                --dest org.gnome.evolution.dataserver.Calendar8 \\
-                --object-path /org/gnome/evolution/dataserver/CalendarFactory \\
-                --method org.gnome.evolution.dataserver.CalendarFactory.OpenCalendar \\
-                "66e623f01943debd6827e4ea9a25d1f112f523d0" 2>/dev/null)
-            
-            if [ -n "$CALENDAR_INFO" ]; then
-                OBJECT_PATH=$(echo "$CALENDAR_INFO" | grep -o "'/[^']*'" | head -1 | tr -d "'")
-                BUS_NAME=$(echo "$CALENDAR_INFO" | grep -o "'org\\.gnome\\.evolution\\.dataserver\\.Calendar[0-9]*'" | tr -d "'")
-                
-                # Get object list from the calendar
-                gdbus call --session \\
-                    --dest "$BUS_NAME" \\
-                    --object-path "$OBJECT_PATH" \\
-                    --method org.gnome.evolution.dataserver.Calendar.GetObjectList \\
-                    "#t" 2>/dev/null | \\
-                python3 -c "
-import sys, re
-output = sys.stdin.read()
-if 'BEGIN:VCALENDAR' in output:
-    # Extract just the iCalendar content from D-Bus tuple output
-    matches = re.findall(r'(BEGIN:VCALENDAR.*?END:VCALENDAR)', output, re.DOTALL)
-    for match in matches:
-        print(match)
-elif output.strip():
-    print(output.strip())
-"
-            fi
-        `]
-        running: false
-        
-        function start() {
-            if (!running) {
-                calendarOutput = ""
-                running = true
-            }
-        }
-        
-        onExited: exitCode => {
-            handleCalendarCompletion(calendarSource, calendarOutput, exitCode, totalSources)
-        }
-        
-        stdout: SplitParser {
-            splitMarker: "\n"
-            onRead: data => {
-                familyCalendarProcess.calendarOutput += data + "\n"
-            }
-        }
-    }
-
-    Process {
-        id: holidaysCalendarProcess
-        property var calendarSource
-        property int totalSources
-        property string calendarOutput: ""
-        
-        command: ["bash", "-c", `
-            # Open holidays Google calendar
-            CALENDAR_INFO=$(gdbus call --session \\
-                --dest org.gnome.evolution.dataserver.Calendar8 \\
-                --object-path /org/gnome/evolution/dataserver/CalendarFactory \\
-                --method org.gnome.evolution.dataserver.CalendarFactory.OpenCalendar \\
-                "514c4961780c62c58972878514eede7eeb15fe36" 2>/dev/null)
-            
-            if [ -n "$CALENDAR_INFO" ]; then
-                OBJECT_PATH=$(echo "$CALENDAR_INFO" | grep -o "'/[^']*'" | head -1 | tr -d "'")
-                BUS_NAME=$(echo "$CALENDAR_INFO" | grep -o "'org\\.gnome\\.evolution\\.dataserver\\.Calendar[0-9]*'" | tr -d "'")
-                
-                # Get object list from the calendar
-                gdbus call --session \\
-                    --dest "$BUS_NAME" \\
-                    --object-path "$OBJECT_PATH" \\
-                    --method org.gnome.evolution.dataserver.Calendar.GetObjectList \\
-                    "#t" 2>/dev/null | \\
-                python3 -c "
-import sys, re
-output = sys.stdin.read()
-if 'BEGIN:VCALENDAR' in output:
-    # Extract just the iCalendar content from D-Bus tuple output
-    matches = re.findall(r'(BEGIN:VCALENDAR.*?END:VCALENDAR)', output, re.DOTALL)
-    for match in matches:
-        print(match)
-elif output.strip():
-    print(output.strip())
-"
-            fi
-        `]
-        running: false
-        
-        function start() {
-            if (!running) {
-                calendarOutput = ""
-                running = true
-            }
-        }
-        
-        onExited: exitCode => {
-            handleCalendarCompletion(calendarSource, calendarOutput, exitCode, totalSources)
-        }
-        
-        stdout: SplitParser {
-            splitMarker: "\n"
-            onRead: data => {
-                holidaysCalendarProcess.calendarOutput += data + "\n"
-            }
-        }
-    }
 
     // Calendar completion handler
     property int completedCalendars: 0
@@ -728,8 +755,8 @@ elif output.strip():
         for (let event of allEvents) {
             if (!event.start) continue
             
-            let startDate = new Date(event.start)
-            let endDate = event.end ? new Date(event.end) : startDate
+            let startDate = event.start instanceof Date ? event.start : new Date(event.start)
+            let endDate = event.end ? (event.end instanceof Date ? event.end : new Date(event.end)) : startDate
             
             let currentDate = new Date(startDate)
             while (currentDate <= endDate) {
@@ -745,8 +772,8 @@ elif output.strip():
         // Sort events by start time for each date
         for (let dateKey in newEventsByDate) {
             newEventsByDate[dateKey].sort((a, b) => {
-                let aTime = new Date(a.start).getTime()
-                let bTime = new Date(b.start).getTime()
+                let aTime = a.start instanceof Date ? a.start.getTime() : new Date(a.start).getTime()
+                let bTime = b.start instanceof Date ? b.start.getTime() : new Date(b.start).getTime()
                 return aTime - bTime
             })
         }

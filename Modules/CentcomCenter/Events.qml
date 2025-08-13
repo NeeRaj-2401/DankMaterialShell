@@ -37,6 +37,12 @@ Rectangle {
   visible: shouldShow
   layer.enabled: true
   Component.onCompleted: {
+    console.log("Events: Component completed, CalendarService type:", typeof CalendarService)
+    console.log("Events: CalendarService available:", CalendarService !== null && CalendarService !== undefined)
+    if (CalendarService) {
+      console.log("Events: CalendarService.edsAvailable:", CalendarService.edsAvailable)
+      console.log("Events: CalendarService.initialized:", CalendarService.initialized)
+    }
     updateSelectedDateEvents()
   }
   onSelectedDateChanged: {

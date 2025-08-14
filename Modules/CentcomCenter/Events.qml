@@ -289,7 +289,7 @@ Rectangle {
               elide: Text.ElideRight
               anchors.verticalCenter: parent.verticalCenter
               maximumLineCount: 1
-              width: Math.min(implicitWidth, 200)
+              width: Math.min(implicitWidth, 400) // Increased to 400px for very long locations
             }
           }
         }

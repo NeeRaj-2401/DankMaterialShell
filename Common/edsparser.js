@@ -64,7 +64,11 @@ function extractVEVENTs(raw) {
   const out = []
   const re = /'([^']*BEGIN:VEVENT[^']*END:VEVENT[^']*)'/g
   let m
-  while ((m = re.exec(raw)) !== null) out.push(m[1].replace(/\\n/g, "\n"))
+  while ((m = re.exec(raw)) !== null) {
+    // Properly handle escaped sequences: \r\n, \n, and \r
+    const cleaned = m[1].replace(/\\r\\n/g, "\n").replace(/\\n/g, "\n").replace(/\\r/g, "\n")
+    out.push(cleaned)
+  }
   return out
 }
 
@@ -97,18 +101,56 @@ function _parseDt(v){
   return { iso:v, allDay:false }
 }
 function parseEvent(ics) {
-  const lines = ics.split(/\r?\n/)
+  // Handle both literal \r\n sequences and actual CRLF
+  const normalizedIcs = ics.replace(/\\r\\n/g, '\n').replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+  const lines = normalizedIcs.split('\n')
   const ev = { uid:"", summary:"", description:"", location:"", status:"CONFIRMED", start:"", end:"" }
+  
+  let inValarm = false
+  
   for (let line of lines) {
-    if (line.startsWith("UID:")) ev.uid = _kv(line).value
-    else if (line.startsWith("SUMMARY:")) ev.summary = _kv(line).value
-    else if (line.startsWith("DESCRIPTION:")) ev.description = _kv(line).value
-    else if (line.startsWith("LOCATION:")) ev.location = _kv(line).value
-    else if (line.startsWith("STATUS:")) ev.status = _kv(line).value
-    else if (line.startsWith("DTSTART;VALUE=DATE:")) ev.start = _parseDt(_kv(line).value).iso
-    else if (line.startsWith("DTEND;VALUE=DATE:")) ev.end = _parseDt(_kv(line).value).iso
-    else if (line.startsWith("DTSTART:")) ev.start = _parseDt(_kv(line).value).iso
-    else if (line.startsWith("DTEND:")) ev.end = _parseDt(_kv(line).value).iso
+    line = line.trim()
+    
+    // Skip VALARM blocks which contain "Alarm notification" text
+    if (line === "BEGIN:VALARM") {
+      inValarm = true
+      continue
+    } else if (line === "END:VALARM") {
+      inValarm = false
+      continue
+    }
+    
+    // Skip lines inside VALARM blocks
+    if (inValarm) continue
+    
+    // Parse main event fields with proper escape sequence handling
+    if (line.startsWith("UID:")) ev.uid = _kv(line).value.trim()
+    else if (line.startsWith("SUMMARY:")) ev.summary = _kv(line).value.trim()
+    else if (line.startsWith("DESCRIPTION:")) ev.description = _kv(line).value.trim()
+    else if (line.startsWith("LOCATION:")) {
+      // Clean escape sequences from location field
+      const rawLocation = _kv(line).value.trim()
+      ev.location = rawLocation
+        .replace(/\\r\\n/g, ', ')  // Convert \r\n to comma-space
+        .replace(/\\n/g, ', ')    // Convert \n to comma-space  
+        .replace(/\\r/g, ', ')    // Convert \r to comma-space
+        .replace(/\\\\,/g, ',')   // Convert double-backslash-comma \\, to regular commas
+        .replace(/\\,/g, ',')     // Convert escaped commas \, to regular commas
+        .replace(/\\;/g, ';')     // Convert escaped semicolons \; to regular semicolons
+        .replace(/\\:/g, ':')     // Convert escaped colons \: to regular colons
+        .replace(/\\\\/g, '\\')   // Convert \\ to \ (must be after other escape sequences)
+        .replace(/,\s*,+/g, ', ') // Clean up multiple consecutive commas
+        .replace(/,\s+,/g, ', ')  // Clean up comma-space-comma patterns
+        .replace(/\s+/g, ' ')     // Normalize multiple spaces to single space
+        .replace(/^,\s*/, '')     // Remove leading comma
+        .replace(/,\s*$/, '')     // Remove trailing comma
+        .trim()                   // Final trim
+    }
+    else if (line.startsWith("STATUS:")) ev.status = _kv(line).value.trim()
+    else if (line.startsWith("DTSTART;VALUE=DATE:")) ev.start = _parseDt(_kv(line).value.trim()).iso
+    else if (line.startsWith("DTEND;VALUE=DATE:")) ev.end = _parseDt(_kv(line).value.trim()).iso
+    else if (line.startsWith("DTSTART:")) ev.start = _parseDt(_kv(line).value.trim()).iso
+    else if (line.startsWith("DTEND:")) ev.end = _parseDt(_kv(line).value.trim()).iso
   }
   return ev
 }

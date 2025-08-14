@@ -30,10 +30,10 @@ PanelWindow {
   }
 
   Component.onCompleted: {
-    // CalendarService is now self-initializing, no ref counting needed
+    // CalendarEDSService is now self-initializing, no ref counting needed
   }
   Component.onDestruction: {
-    // CalendarService is now self-initializing, no ref counting needed
+    // CalendarEDSService is now self-initializing, no ref counting needed
   }
 
   visible: internalVisible
@@ -83,7 +83,7 @@ PanelWindow {
       let calendarHeight = 300
       let mainRowHeight = Math.max(widgetHeight, calendarHeight)
       contentHeight += mainRowHeight + Theme.spacingM
-      if (CalendarService && CalendarService.initialized) {
+      if (CalendarEDSService.available) {
         let hasEvents = events.selectedDateEvents
             && events.selectedDateEvents.length > 0
         let eventsHeight = hasEvents ? Math.min(
@@ -140,18 +140,17 @@ PanelWindow {
     }
 
     Connections {
-      function onEventsByDateChanged() {
+      function onEventsUpdated() {
         if (mainContainer.opacity === 1)
           mainContainer.height = mainContainer.calculateHeight()
       }
 
-      function onInitializedChanged() {
+      function onAvailableChanged() {
         if (mainContainer.opacity === 1)
           mainContainer.height = mainContainer.calculateHeight()
       }
 
-      target: CalendarService
-      enabled: CalendarService !== null
+      target: CalendarEDSService
     }
 
     Connections {

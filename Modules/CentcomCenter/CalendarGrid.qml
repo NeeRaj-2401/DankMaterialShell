@@ -10,14 +10,9 @@ Column {
 
   property date displayDate: new Date()
   property date selectedDate: new Date()
-  
-  // Force CalendarService instantiation
-  property bool calendarServiceCheck: CalendarService ? CalendarService.initialized : false
 
   function loadEventsForMonth() {
-    console.log("CalendarGrid: loadEventsForMonth called, CalendarService:", CalendarService ? "available" : "null")
-    if (!CalendarService || !CalendarService.initialized) {
-      console.log("CalendarGrid: CalendarService not initialized, skipping")
+    if (!CalendarEDSService.available) {
       return
     }
 
@@ -31,8 +26,11 @@ Column {
     let endDate = new Date(lastDay)
     endDate.setDate(endDate.getDate() + (6 - lastDay.getDay(
                                            )) + 7) // Extra week padding
-    console.log("CalendarGrid: About to call CalendarService.loadEvents")
-    CalendarService.loadEvents(startDate, endDate)
+    
+    CalendarEDSService.getEvents({
+      start: startDate.toISOString(),
+      end: endDate.toISOString()
+    })
   }
 
   spacing: Theme.spacingM
@@ -40,21 +38,23 @@ Column {
     loadEventsForMonth()
   }
   Component.onCompleted: {
-    // CalendarService is now self-initializing, no ref counting needed
     loadEventsForMonth()
-  }
-  Component.onDestruction: {
-    // CalendarService is now self-initializing, no ref counting needed
   }
 
   Connections {
-    function onInitializedChanged() {
-      if (CalendarService && CalendarService.initialized)
+    function onAvailableChanged() {
+      if (CalendarEDSService.available) {
         loadEventsForMonth()
+      }
     }
 
-    target: CalendarService
-    enabled: CalendarService !== null
+    function onEventsUpdated() {
+      // Trigger re-evaluation of event indicators
+      gridRepeater.model = 0
+      gridRepeater.model = 42
+    }
+
+    target: CalendarEDSService
   }
 
   Row {
@@ -158,6 +158,7 @@ Column {
   }
 
   Grid {
+    id: grid
     property date firstDay: {
       let date = new Date(displayDate.getFullYear(), displayDate.getMonth(), 1)
       let dayOfWeek = date.getDay()
@@ -171,6 +172,7 @@ Column {
     rows: 6
 
     Repeater {
+      id: gridRepeater
       model: 42
 
       Rectangle {
@@ -216,8 +218,7 @@ Column {
 
             anchors.fill: parent
             radius: parent.radius
-            visible: CalendarService && CalendarService.initialized
-                     && CalendarService.hasEventsForDate(dayDate)
+            visible: CalendarEDSService.available && CalendarEDSService.hasEventsForDate(dayDate)
             opacity: {
               if (isSelected)
                 return 0.9

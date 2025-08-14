@@ -11,11 +11,11 @@ Rectangle {
   property date selectedDate: new Date()
   property var selectedDateEvents: []
   property bool hasEvents: selectedDateEvents && selectedDateEvents.length > 0
-  property bool shouldShow: CalendarService && CalendarService.initialized
+  property bool shouldShow: CalendarEDSService.available
 
   function updateSelectedDateEvents() {
-    if (CalendarService && CalendarService.initialized) {
-      let events = CalendarService.getEventsForDate(selectedDate)
+    if (CalendarEDSService.available) {
+      let events = CalendarEDSService.getEventsForDate(selectedDate)
       selectedDateEvents = events
     } else {
       selectedDateEvents = []
@@ -44,16 +44,15 @@ Rectangle {
   }
 
   Connections {
-    function onEventsByDateChanged() {
+    function onEventsUpdated() {
       updateSelectedDateEvents()
     }
 
-    function onInitializedChanged() {
+    function onAvailableChanged() {
       updateSelectedDateEvents()
     }
 
-    target: CalendarService
-    enabled: CalendarService !== null
+    target: CalendarEDSService
   }
 
   Row {
@@ -214,7 +213,7 @@ Rectangle {
 
         StyledText {
           width: parent.width
-          text: modelData.title
+          text: modelData.summary || modelData.title || "Untitled Event"
           font.pixelSize: Theme.fontSizeMedium
           color: Theme.surfaceText
           font.weight: Font.Medium

@@ -123,26 +123,31 @@ Singleton {
         }
     }
 
-    function parseDBusCalendarOutput(dbusOutput, calendarSource) {
+    function parseEDSDBusOutput(dbusOutput, calendarSource) {
         let events = []
         
         if (!dbusOutput || !dbusOutput.includes("BEGIN:VEVENT")) {
             return events
         }
         
-        // Parse the D-Bus array output format
-        // Expected format: as N "icalendar_string1" "icalendar_string2" ...
-        let lines = dbusOutput.split('\n')
-        for (let line of lines) {
-            if (line.includes("BEGIN:VEVENT")) {
-                // Extract iCalendar string from D-Bus format
-                let icalMatch = line.match(/"(BEGIN:VEVENT.*?END:VEVENT[^"]*)"/)
-                if (icalMatch) {
-                    let icalString = icalMatch[1].replace(/\\r\\n/g, '\n').replace(/\\"/g, '"')
-                    let eventEvents = parseICalendarEvents(icalString, calendarSource, new Date(2025, 0, 1), new Date(2025, 11, 31))
-                    events = events.concat(eventEvents)
+        try {
+            // Parse the D-Bus array output format from EDS GetObjectList
+            // Expected format: ['array', ["icalendar_string1", "icalendar_string2", ...]]
+            let icalMatches = dbusOutput.match(/"(BEGIN:VCALENDAR[\s\S]*?END:VCALENDAR)"/g)
+            if (icalMatches) {
+                for (let match of icalMatches) {
+                    // Clean up the iCalendar string
+                    let icalString = match.substring(1, match.length - 1) // Remove quotes
+                    icalString = icalString.replace(/\n/g, '\n').replace(/\n/g, '\n').replace(/"/g, '"')
+                    
+                    if (icalString.includes("BEGIN:VEVENT")) {
+                        let eventEvents = parseICalendarEvents(icalString, calendarSource, root.lastStartDate, root.lastEndDate)
+                        events = events.concat(eventEvents)
+                    }
                 }
             }
+        } catch (error) {
+            console.warn("CalendarService: Error parsing D-Bus calendar output:", error)
         }
         
         return events
@@ -184,8 +189,11 @@ Singleton {
     }
 
     function ensureServicesRunning() {
-        if (!servicesStartProcess.running)
+        console.log("CalendarService: ensureServicesRunning() called")
+        if (!servicesStartProcess.running) {
+            console.log("CalendarService: Starting servicesStartProcess")
             servicesStartProcess.running = true
+        }
     }
 
     function loadCurrentMonth() {
@@ -233,16 +241,13 @@ Singleton {
         for (let source of calendarSources) {
             if (!source.enabled) continue
             
-            if (source.method === "file") {
-                // Load from .ics file directly
-                fileLoadProcess.calendarSource = source
-                fileLoadProcess.totalSources = totalEnabledSources
-                fileLoadProcess.start()
-            } else if (source.method === "dbus_direct") {
-                // Load via direct D-Bus call to discovered calendar object
-                directDBusProcess.calendarSource = source
-                directDBusProcess.totalSources = totalEnabledSources
-                directDBusProcess.start()
+            if (source.method === "eds_dbus") {
+                // Load via EDS D-Bus interface
+                edsDBusProcess.calendarSource = source
+                edsDBusProcess.totalSources = totalEnabledSources
+                edsDBusProcess.startDate = startDate
+                edsDBusProcess.endDate = endDate
+                edsDBusProcess.start()
             }
         }
     }
@@ -266,6 +271,7 @@ Singleton {
 
     function hasEventsForDate(date) {
         let events = getEventsForDate(date)
+        console.log("CalendarService: *** DEBUG hasEventsForDate called for", Qt.formatDate(date, "yyyy-MM-dd"), "- found", events.length, "events")
         return events.length > 0
     }
 
@@ -318,159 +324,211 @@ END:VCALENDAR`
     }
 
     Component.onCompleted: {
-        // Start calendar discovery
-        discoverCalendars()
+        console.log("CalendarService: Component completed, starting initialization")
+        console.log("CalendarService: *** CALENDAR SERVICE DEBUG: COMPONENT LOADED ***")
+        console.log("CalendarService: Initial state - edsAvailable:", edsAvailable, "servicesRunning:", servicesRunning)
+        // Ensure EDS services are available first
+        console.log("CalendarService: About to call ensureServicesRunning()")
+        ensureServicesRunning()
     }
     
     function discoverCalendars() {
         // Discover available calendar sources via D-Bus
+        console.log("CalendarService: Starting calendar discovery")
         calendarDiscoveryProcess.running = true
     }
     
-    function parseDiscoveredCalendars(discoveryOutput) {
-        let sources = []
-        let lines = discoveryOutput.split('\n')
-        let currentCalendar = {}
-        let busName = ""
-        
-        // Define color palette for different calendar types
-        let colorPalette = [
-            "#62a0ea", // Blue for personal/system
-            "#9fe1e7", // Cyan for Google Personal  
-            "#f691b2", // Pink for Google Family
-            "#42d692", // Green for Google Holidays
-            "#ffbe6f", // Orange for Birthdays
-            "#a377b8", // Purple for Work
-            "#ff6b6b", // Red for Important
-            "#4ecdc4"  // Teal for Other
-        ]
-        let colorIndex = 0
-        
-        for (let line of lines) {
-            line = line.trim()
-            
-            if (line.startsWith("BUS=")) {
-                busName = line.substring(4)
-            } else if (line.startsWith("CALENDAR_PATH=")) {
-                if (currentCalendar.path || currentCalendar.filePath) {
-                    // Finalize previous calendar
-                    sources.push(currentCalendar)
-                    colorIndex = (colorIndex + 1) % colorPalette.length
-                }
-                currentCalendar = {
-                    color: colorPalette[colorIndex],
-                    enabled: true
-                }
-                
-                let pathValue = line.substring(14)
-                if (pathValue === "file") {
-                    currentCalendar.method = "file"
-                } else {
-                    currentCalendar.path = pathValue
-                    currentCalendar.method = "dbus_direct"
-                }
-            } else if (line.startsWith("CALENDAR_NAME=")) {
-                currentCalendar.name = line.substring(14)
-                currentCalendar.id = line.substring(14)
-            } else if (line.startsWith("CACHE_DIR=")) {
-                currentCalendar.cacheDir = line.substring(10)
-            } else if (line.startsWith("WRITABLE=")) {
-                currentCalendar.writable = line.substring(9) === "true"
-            } else if (line.startsWith("FILE_PATH=")) {
-                currentCalendar.filePath = line.substring(10)
-            } else if (line.startsWith("BUS_NAME=")) {
-                currentCalendar.busName = line.substring(9)
-            }
-        }
-        
-        // Add the last calendar
-        if (currentCalendar.path || currentCalendar.filePath) {
-            sources.push(currentCalendar)
-        }
-        
-        // Set discovered sources
-        root.calendarSources = sources
-        root.calendarDiscoveryCompleted = true
-        root.edsAvailable = sources.length > 0
-        root.servicesRunning = sources.length > 0
-        root.initialized = true
-        
-        console.log("CalendarService: Discovered", sources.length, "calendar sources")
-        
-        // Load events from discovered calendars
-        if (sources.length > 0) {
-            loadCurrentMonth()
-        }
-    }
 
     Process {
         id: calendarDiscoveryProcess
         
-        command: ["bash", "-c", `
-            # Discover calendar sources - simplified approach
-            BUS=$(busctl --user list --no-pager | awk '/org\.gnome\.(evolution\.dataserver|Evolution)\.Calendar[0-9]*/{print $1; exit}')
-            if [ -z "$BUS" ]; then
-                echo "No EDS Calendar bus found" >&2
-                exit 1
-            fi
-            
-            echo "BUS=$BUS"
-            
-            # Check for system calendar file
-            SYSTEM_CALENDAR="/home/purian23/.local/share/evolution/calendar/system/calendar.ics"
-            if [ -f "$SYSTEM_CALENDAR" ]; then
-                echo "CALENDAR_PATH=file"
-                echo "CALENDAR_NAME=system"
-                echo "CACHE_DIR=/home/purian23/.local/share/evolution/calendar/system"
-                echo "WRITABLE=true"
-                echo "FILE_PATH=$SYSTEM_CALENDAR"
-                echo "---"
-            fi
-            
-            # Try to discover other calendar sources via CalendarFactory
-            # Common calendar IDs to try
-            for cal_id in "birthdays" "contacts"; do
-                CALENDAR_INFO=$(gdbus call --session \\
-                    --dest "$BUS" \\
-                    --object-path /org/gnome/evolution/dataserver/CalendarFactory \\
-                    --method org.gnome.evolution.dataserver.CalendarFactory.OpenCalendar \\
-                    "$cal_id" 2>/dev/null)
-                
-                if [ -n "$CALENDAR_INFO" ] && echo "$CALENDAR_INFO" | grep -q "object path"; then
-                    OBJECT_PATH=$(echo "$CALENDAR_INFO" | grep -o "'/[^']*'" | head -1 | tr -d "'")
-                    CAL_BUS_NAME=$(echo "$CALENDAR_INFO" | grep -o "'[^']*Calendar[0-9]*'" | tr -d "'")
-                    
-                    if [ -n "$OBJECT_PATH" ] && [ -n "$CAL_BUS_NAME" ]; then
-                        echo "CALENDAR_PATH=$OBJECT_PATH"
-                        echo "CALENDAR_NAME=$cal_id"
-                        echo "CACHE_DIR=/home/purian23/.cache/evolution/calendar/$cal_id"
-                        echo "WRITABLE=false"
-                        echo "BUS_NAME=$CAL_BUS_NAME"
-                        echo "---"
-                    fi
-                fi
-            done
-        `]
+        command: ["gdbus", "call", "--session", "--dest", "org.gnome.evolution.dataserver.Sources5", 
+                  "--object-path", "/org/gnome/evolution/dataserver/SourceManager",
+                  "--method", "org.freedesktop.DBus.ObjectManager.GetManagedObjects"]
         running: false
         
-        onExited: exitCode => {
-            if (exitCode === 0) {
-                parseDiscoveredCalendars(calendarDiscoveryProcess.output)
-            } else {
-                console.warn("CalendarService: Failed to discover calendars, exit code:", exitCode)
-                // Set service as unavailable
-                root.edsAvailable = false
-                root.servicesRunning = false
-                root.initialized = true
+        stdout: StdioCollector {
+            onStreamFinished: {
+                console.log("CalendarService: Discovery process completed, text length:", text.length)
+                parseEDSSources(text)
             }
         }
         
-        property string output: ""
-        stdout: SplitParser {
-            splitMarker: "\n"
-            onRead: data => {
-                calendarDiscoveryProcess.output += data + "\n"
+        onExited: exitCode => {
+            if (exitCode !== 0) {
+                console.warn("CalendarService: Failed to discover calendars, exit code:", exitCode)
+                // Try to ensure services are running first
+                ensureServicesRunning()
             }
+        }
+    }
+    
+    function parseEDSSources(dbusOutput) {
+        let sources = []
+        let processedUIDs = new Set()  // Track processed UIDs to avoid duplicates
+        console.log("CalendarService: Starting to parse EDS sources")
+        console.log("CalendarService: D-Bus output length:", dbusOutput.length)
+        
+        try {
+            // Parse D-Bus output to extract calendar sources - improved regex for complex structure
+            let sourcePattern = /'UID':\s*<'([^']+)'>,\s*'Data':\s*<'([^']+(?:\\.[^']*)*)'>/g
+            let match
+            
+            while ((match = sourcePattern.exec(dbusOutput)) !== null) {
+                let uid = match[1]
+                let rawData = match[2]
+                
+                // Unescape the data properly - handle multiple levels of escaping
+                let data = rawData.replace(/\\n/g, '\n').replace(/\\\\n/g, '\n').replace(/\\'/g, "'")
+                
+                console.log("CalendarService: Processing source", uid)
+                
+                // Check if this is a calendar source (has [Calendar] section)
+                let hasCalendarSection = data.includes('[Calendar]')
+                let hasTaskListSection = data.includes('[Task List]')
+                
+                // Skip if this is not a calendar or if it's a task list
+                if (!hasCalendarSection) {
+                    // Special case for system calendars and birthdays
+                    if (uid !== 'system-calendar' && uid !== 'birthdays') {
+                        console.log("CalendarService: Skipping non-calendar source:", uid)
+                        continue
+                    }
+                }
+                
+                // Explicitly skip task list entries
+                if (hasTaskListSection) {
+                    console.log("CalendarService: Skipping task list:", uid)
+                    continue
+                }
+                
+                // Skip duplicates based on UID
+                if (processedUIDs.has(uid)) {
+                    console.log("CalendarService: Skipping duplicate UID:", uid)
+                    continue
+                }
+                processedUIDs.add(uid)
+                
+                // Parse DisplayName from INI-style data
+                let displayName = uid // fallback
+                
+                // Find DisplayName= in the data - look in [Data Source] section first
+                let lines = data.split('\n')
+                let inDataSourceSection = false
+                
+                for (let line of lines) {
+                    line = line.trim()
+                    
+                    if (line === '[Data Source]') {
+                        inDataSourceSection = true
+                        continue
+                    } else if (line.startsWith('[') && line.endsWith(']') && line !== '[Data Source]') {
+                        inDataSourceSection = false
+                        continue
+                    }
+                    
+                    if (inDataSourceSection && line.startsWith('DisplayName=')) {
+                        displayName = line.substring(12).trim()
+                        break
+                    }
+                }
+                
+                // If no DisplayName found in [Data Source], try WebDAV Backend section for cloud calendars
+                if (displayName === uid && data.includes('[WebDAV Backend]')) {
+                    let webdavMatch = data.match(/\[WebDAV Backend\][^[]*DisplayName=([^\n]+)/);
+                    if (webdavMatch) {
+                        displayName = webdavMatch[1].trim()
+                    }
+                }
+                
+                console.log("CalendarService: Found calendar", uid, "with name", displayName)
+                
+                // Check if calendar is enabled
+                let enabled = true
+                let enabledMatch = data.match(/Enabled=(true|false)/)
+                if (enabledMatch && enabledMatch[1] === 'false') {
+                    console.log("CalendarService: Skipping disabled calendar:", displayName)
+                    continue
+                }
+                
+                // Skip known problematic calendars that often fail (but keep holidays for now)
+                // if (displayName.includes('Holidays') || uid.includes('holiday')) {
+                //     console.log("CalendarService: Skipping potentially problematic holiday calendar:", displayName)
+                //     continue
+                // }
+                
+                // Determine calendar color if available
+                let color = '#62a0ea' // default blue
+                
+                // Try to find color in [Calendar] section
+                let calendarSectionMatch = data.match(/\[Calendar\][^[]*Color=([^\\n\s]+)/);
+                if (calendarSectionMatch) {
+                    color = calendarSectionMatch[1].trim()
+                } else {
+                    // Try WebDAV Backend section for cloud calendars
+                    let webdavColorMatch = data.match(/\[WebDAV Backend\][^[]*Color=([^\\n\s]+)/);
+                    if (webdavColorMatch) {
+                        color = webdavColorMatch[1].trim()
+                    }
+                }
+                
+                // Check backend type
+                let backend = 'local'
+                if (data.includes('BackendName=caldav')) {
+                    backend = 'caldav'
+                } else if (data.includes('BackendName=microsoft365')) {
+                    backend = 'microsoft365'
+                } else if (data.includes('BackendName=google')) {
+                    backend = 'google'
+                } else if (data.includes('BackendName=local')) {
+                    backend = 'local'
+                } else if (data.includes('BackendName=contacts')) {
+                    backend = 'contacts'
+                }
+                
+                // Check connection status
+                let connectionStatus = 'unknown'
+                let connectionMatch = data.match(/'ConnectionStatus':\s*<'([^']*)'>/);
+                if (connectionMatch) {
+                    connectionStatus = connectionMatch[1]
+                }
+                
+                sources.push({
+                    uid: uid,
+                    name: displayName,
+                    id: displayName,
+                    color: color,
+                    backend: backend,
+                    enabled: enabled,
+                    method: "eds_dbus"
+                })
+            }
+            
+            console.log("CalendarService: Discovered", sources.length, "calendar sources:")
+            for (let source of sources) {
+                console.log("  -", source.name, "(", source.uid, ") backend:", source.backend, "enabled:", source.enabled)
+            }
+            
+            // Set discovered sources
+            root.calendarSources = sources
+            root.calendarDiscoveryCompleted = true
+            root.edsAvailable = sources.length > 0
+            root.servicesRunning = sources.length > 0
+            root.initialized = true
+            
+            // Load events from discovered calendars
+            if (sources.length > 0) {
+                console.log("CalendarService: Starting to load events from", sources.length, "calendars")
+                loadCurrentMonth()
+            } else {
+                console.log("CalendarService: No calendars discovered, no events to load")
+            }
+            
+        } catch (error) {
+            console.warn("CalendarService: Error parsing EDS sources:", error)
+            root.edsAvailable = false
+            root.servicesRunning = false
+            root.initialized = true
         }
     }
 
@@ -488,13 +546,27 @@ END:VCALENDAR`
         command: ["bash", "-c", "systemctl --user start evolution-source-registry.service evolution-calendar-factory.service"]
         running: false
         onExited: exitCode => {
-            root.servicesRunning = (exitCode === 0)
+            console.log("CalendarService: Service start process exited with code:", exitCode)
             if (exitCode === 0) {
-                checkEDSAvailability()
+                console.log("CalendarService: EDS services started successfully")
+                // Services are now running, set flags and discover calendars
+                root.servicesRunning = true
+                root.edsAvailable = true
+                root.initialized = true
+                discoverCalendars()
             } else {
-                console.warn("Failed to start EDS services:", exitCode)
+                console.warn("CalendarService: Failed to start EDS services:", exitCode)
+                // Try to check if they're already running
+                checkEDSAvailability()
             }
         }
+    }
+
+    Timer {
+        id: serviceInitTimer
+        interval: 1000
+        repeat: false
+        onTriggered: discoverCalendars()
     }
 
     Process {
@@ -503,14 +575,16 @@ END:VCALENDAR`
         command: ["bash", "-c", "systemctl --user is-active evolution-source-registry.service && systemctl --user is-active evolution-calendar-factory.service"]
         running: false
         onExited: exitCode => {
-            root.edsAvailable = (exitCode === 0)
-            console.log("CalendarService: EDS check completed, available:", root.edsAvailable)
+            console.log("CalendarService: EDS check completed with exit code:", exitCode)
             if (exitCode === 0) {
+                console.log("CalendarService: EDS services are running, starting discovery")
+                root.edsAvailable = true
                 root.servicesRunning = true
-                console.log("CalendarService: Loading current month...")
-                loadCurrentMonth()
+                root.initialized = true
+                discoverCalendars()
             } else {
-                console.warn("CalendarService: EDS services not available, exit code:", exitCode)
+                console.log("CalendarService: EDS services not detected, trying to start them")
+                ensureServicesRunning()
             }
         }
     }
@@ -662,36 +736,150 @@ except:
         }
     }
 
-    // Direct D-Bus Process for discovered calendars
+    // EDS D-Bus Process for calendar sources  
     Process {
-        id: directDBusProcess
+        id: edsDBusProcess
         property var calendarSource
         property int totalSources
-        property string calendarOutput: ""
+        property date startDate
+        property date endDate 
         
-        command: ["busctl", "--user", "call", calendarSource ? calendarSource.busName : "", calendarSource ? calendarSource.path : "", "org.gnome.evolution.dataserver.Calendar", "GetObjectList", "s", "#t"]
         running: false
         
         function start() {
             if (!running && calendarSource) {
-                calendarOutput = ""
-                running = true
+                // First get the calendar bus name
+                getCalendarBus.running = true
+            }
+        }
+    }
+    
+    Process {
+        id: getCalendarBus
+        command: ["busctl", "--user", "list", "--no-pager"]
+        running: false
+        
+        stdout: StdioCollector {
+            onStreamFinished: {
+                let calendarBus = ""
+                let lines = text.split('\n')
+                for (let line of lines) {
+                    if (line.includes('org.gnome.evolution.dataserver.Calendar')) {
+                        let parts = line.split(/\s+/)
+                        if (parts[0] && parts[0].includes('Calendar')) {
+                            calendarBus = parts[0]
+                            break
+                        }
+                    }
+                }
+                
+                if (calendarBus) {
+                    openCalendar.calendarBus = calendarBus
+                    openCalendar.running = true
+                } else {
+                    console.warn("CalendarService: No calendar bus found")
+                    handleCalendarCompletion(edsDBusProcess.calendarSource, [], 1, edsDBusProcess.totalSources)
+                }
+            }
+        }
+    }
+    
+    Process {
+        id: openCalendar
+        property string calendarBus: ""
+        running: false
+        
+        command: calendarBus ? 
+            ["gdbus", "call", "--session", "--dest", calendarBus,
+             "--object-path", "/org/gnome/evolution/dataserver/CalendarFactory",
+             "--method", "org.gnome.evolution.dataserver.CalendarFactory.OpenCalendar",
+             edsDBusProcess.calendarSource ? edsDBusProcess.calendarSource.uid : ""] : []
+        
+        stdout: StdioCollector {
+            onStreamFinished: {
+                // Parse the calendar info response
+                // Expected format: ('/path/to/calendar', 'bus.name.Calendar8')
+                let objectPathMatch = text.match(/\('([^']+)',/)
+                let busNameMatch = text.match(/, '([^']*Calendar[0-9]*)'/)  
+                
+                if (objectPathMatch && busNameMatch) {
+                    let objectPath = objectPathMatch[1]
+                    let busName = busNameMatch[1]
+                    
+                    console.log("CalendarService: Opened calendar", edsDBusProcess.calendarSource?.name, "with path:", objectPath, "bus:", busName)
+                    
+                    if (objectPath !== '/' && busName) {
+                        getCalendarEvents.objectPath = objectPath
+                        getCalendarEvents.busName = busName
+                        getCalendarEvents.running = true
+                    } else {
+                        console.warn("CalendarService: Invalid calendar paths for", edsDBusProcess.calendarSource ? edsDBusProcess.calendarSource.name : "unknown")
+                        handleCalendarCompletion(edsDBusProcess.calendarSource, [], 1, edsDBusProcess.totalSources)
+                    }
+                } else {
+                    console.warn("CalendarService: Failed to parse calendar info for", edsDBusProcess.calendarSource ? edsDBusProcess.calendarSource.name : "unknown", "- response:", text.trim())
+                    handleCalendarCompletion(edsDBusProcess.calendarSource, [], 1, edsDBusProcess.totalSources)
+                }
             }
         }
         
         onExited: exitCode => {
-            if (exitCode === 0) {
-                let events = parseDBusCalendarOutput(directDBusProcess.calendarOutput, calendarSource)
-                handleCalendarCompletion(calendarSource, events, exitCode, totalSources)
-            } else {
-                handleCalendarCompletion(calendarSource, [], exitCode, totalSources)
+            if (exitCode !== 0) {
+                console.warn("CalendarService: Failed to open calendar", edsDBusProcess.calendarSource ? edsDBusProcess.calendarSource.name : "unknown")
+                handleCalendarCompletion(edsDBusProcess.calendarSource, [], exitCode, edsDBusProcess.totalSources)
+            }
+        }
+    }
+    
+    Process {
+        id: getCalendarEvents
+        property string objectPath: ""
+        property string busName: ""
+        running: false
+        
+        command: {
+            if (!objectPath || !busName) return []
+            
+            // Create date range query using S-expressions
+            // Use ISO string format and extract date parts more reliably
+            let startDate = edsDBusProcess.startDate || new Date(2025, 0, 1) // Jan 1, 2025
+            let endDate = edsDBusProcess.endDate || new Date(2025, 11, 31)   // Dec 31, 2025
+            
+            let startYear = startDate.getFullYear()
+            let startMonth = startDate.getMonth() + 1
+            let startDay = startDate.getDate()
+            let startDateStr = startYear + 
+                              (startMonth < 10 ? "0" + startMonth : startMonth) + 
+                              (startDay < 10 ? "0" + startDay : startDay) + "T000000Z"
+            
+            let endYear = endDate.getFullYear()
+            let endMonth = endDate.getMonth() + 1
+            let endDay = endDate.getDate()
+            let endDateStr = endYear + 
+                            (endMonth < 10 ? "0" + endMonth : endMonth) + 
+                            (endDay < 10 ? "0" + endDay : endDay) + "T235959Z"
+            
+            let query = `(occur-in-time-range? (make-time "${startDateStr}") (make-time "${endDateStr}"))`
+            
+            console.log("CalendarService: Querying calendar", edsDBusProcess.calendarSource?.name, "from", startDateStr, "to", endDateStr)
+            
+            return ["gdbus", "call", "--session", "--dest", busName,
+                    "--object-path", objectPath,
+                    "--method", "org.gnome.evolution.dataserver.Calendar.GetObjectList",
+                    query]
+        }
+        
+        stdout: StdioCollector {
+            onStreamFinished: {
+                let events = parseEDSDBusOutput(text, edsDBusProcess.calendarSource)
+                handleCalendarCompletion(edsDBusProcess.calendarSource, events, 0, edsDBusProcess.totalSources)
             }
         }
         
-        stdout: SplitParser {
-            splitMarker: "\n"
-            onRead: data => {
-                directDBusProcess.calendarOutput += data + "\n"
+        onExited: exitCode => {
+            if (exitCode !== 0) {
+                console.warn("CalendarService: Failed to get events from", edsDBusProcess.calendarSource ? edsDBusProcess.calendarSource.name : "unknown")
+                handleCalendarCompletion(edsDBusProcess.calendarSource, [], exitCode, edsDBusProcess.totalSources)
             }
         }
     }
@@ -701,6 +889,8 @@ except:
     property int completedCalendars: 0
     
     function handleCalendarCompletion(source, eventsOrOutput, exitCode, totalSources) {
+        console.log("CalendarService: handleCalendarCompletion called for", source ? source.name : "unknown", "exitCode:", exitCode)
+        
         if (exitCode === 0) {
             let events = []
             
@@ -720,13 +910,15 @@ except:
                 console.log("CalendarService: No events found in", source.name)
             }
         } else {
-            console.warn("CalendarService: Failed to load events from", source.name, "exit code:", exitCode)
+            console.warn("CalendarService: Failed to load events from", source ? source.name : "unknown", "exit code:", exitCode, "- continuing with other calendars")
         }
         
         completedCalendars++
+        console.log("CalendarService: Completed", completedCalendars, "of", totalSources, "calendars")
         
         if (completedCalendars >= totalSources) {
             // All calendars completed, update eventsByDate
+            console.log("CalendarService: All calendars processed, updating events by date with", allEvents.length, "total events")
             updateEventsByDate()
             completedCalendars = 0
             root.isLoading = false
@@ -735,6 +927,11 @@ except:
 
     function updateEventsByDate() {
         let newEventsByDate = {}
+        
+        console.log("CalendarService: updateEventsByDate called with", allEvents.length, "total events")
+        for (let i = 0; i < Math.min(5, allEvents.length); i++) {
+            console.log("  Event", i + ":", allEvents[i].title, "on", allEvents[i].start, "in calendar", allEvents[i].calendar)
+        }
         
         for (let event of allEvents) {
             if (!event.start) continue

@@ -13,6 +13,7 @@ import qs.Modules.Lock
 import qs.Modules.Notifications.Center
 import qs.Modules.Notifications.Popup
 import qs.Modules.ProcessList
+import qs.Services
 import qs.Modules.Settings
 import qs.Modules.TopBar
 import qs.Modules.Dock
@@ -20,6 +21,9 @@ import qs.Services
 
 ShellRoot {
   id: root
+  
+  // Force CalendarService initialization
+  property bool calendarInit: CalendarService ? CalendarService.initialized : false
 
   WallpaperBackground {}
 

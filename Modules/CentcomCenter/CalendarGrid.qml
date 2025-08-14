@@ -10,10 +10,16 @@ Column {
 
   property date displayDate: new Date()
   property date selectedDate: new Date()
+  
+  // Force CalendarService instantiation
+  property bool calendarServiceCheck: CalendarService ? CalendarService.initialized : false
 
   function loadEventsForMonth() {
-    if (!CalendarService || !CalendarService.edsAvailable)
+    console.log("CalendarGrid: loadEventsForMonth called, CalendarService:", CalendarService ? "available" : "null")
+    if (!CalendarService || !CalendarService.initialized) {
+      console.log("CalendarGrid: CalendarService not initialized, skipping")
       return
+    }
 
     let firstDay = new Date(displayDate.getFullYear(),
                             displayDate.getMonth(), 1)
@@ -25,6 +31,7 @@ Column {
     let endDate = new Date(lastDay)
     endDate.setDate(endDate.getDate() + (6 - lastDay.getDay(
                                            )) + 7) // Extra week padding
+    console.log("CalendarGrid: About to call CalendarService.loadEvents")
     CalendarService.loadEvents(startDate, endDate)
   }
 
@@ -33,12 +40,16 @@ Column {
     loadEventsForMonth()
   }
   Component.onCompleted: {
+    // CalendarService is now self-initializing, no ref counting needed
     loadEventsForMonth()
+  }
+  Component.onDestruction: {
+    // CalendarService is now self-initializing, no ref counting needed
   }
 
   Connections {
-    function onEdsAvailableChanged() {
-      if (CalendarService && CalendarService.edsAvailable)
+    function onInitializedChanged() {
+      if (CalendarService && CalendarService.initialized)
         loadEventsForMonth()
     }
 
@@ -205,7 +216,7 @@ Column {
 
             anchors.fill: parent
             radius: parent.radius
-            visible: CalendarService && CalendarService.edsAvailable
+            visible: CalendarService && CalendarService.initialized
                      && CalendarService.hasEventsForDate(dayDate)
             opacity: {
               if (isSelected)

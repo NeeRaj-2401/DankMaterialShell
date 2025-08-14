@@ -29,23 +29,23 @@ PanelWindow {
     triggerScreen = screen
   }
 
+  Component.onCompleted: {
+    // CalendarService is now self-initializing, no ref counting needed
+  }
+  Component.onDestruction: {
+    // CalendarService is now self-initializing, no ref counting needed
+  }
+
   visible: internalVisible
   screen: triggerScreen
   onCalendarVisibleChanged: {
     if (calendarVisible) {
       internalVisible = true
-      Qt.callLater(() => {
-                     internalVisible = true
-                     calendarGrid.loadEventsForMonth()
-                   })
     } else {
       internalVisible = false
     }
   }
-  onVisibleChanged: {
-    if (visible && calendarGrid)
-      calendarGrid.loadEventsForMonth()
-  }
+
   implicitWidth: 480
   implicitHeight: 600
   WlrLayershell.layer: WlrLayershell.Overlay
@@ -83,7 +83,7 @@ PanelWindow {
       let calendarHeight = 300
       let mainRowHeight = Math.max(widgetHeight, calendarHeight)
       contentHeight += mainRowHeight + Theme.spacingM
-      if (CalendarService && CalendarService.edsAvailable) {
+      if (CalendarService && CalendarService.initialized) {
         let hasEvents = events.selectedDateEvents
             && events.selectedDateEvents.length > 0
         let eventsHeight = hasEvents ? Math.min(
@@ -145,7 +145,7 @@ PanelWindow {
           mainContainer.height = mainContainer.calculateHeight()
       }
 
-      function onEdsAvailableChanged() {
+      function onInitializedChanged() {
         if (mainContainer.opacity === 1)
           mainContainer.height = mainContainer.calculateHeight()
       }

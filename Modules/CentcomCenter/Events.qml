@@ -11,10 +11,10 @@ Rectangle {
   property date selectedDate: new Date()
   property var selectedDateEvents: []
   property bool hasEvents: selectedDateEvents && selectedDateEvents.length > 0
-  property bool shouldShow: CalendarService && CalendarService.edsAvailable
+  property bool shouldShow: CalendarService && CalendarService.initialized
 
   function updateSelectedDateEvents() {
-    if (CalendarService && CalendarService.edsAvailable) {
+    if (CalendarService && CalendarService.initialized) {
       let events = CalendarService.getEventsForDate(selectedDate)
       selectedDateEvents = events
     } else {
@@ -37,13 +37,6 @@ Rectangle {
   visible: shouldShow
   layer.enabled: true
   Component.onCompleted: {
-    console.log("Events: Component completed, CalendarService type:", typeof CalendarService)
-    console.log("Events: CalendarService available:", CalendarService !== null && CalendarService !== undefined)
-    if (CalendarService) {
-      console.log("Events: CalendarService.edsAvailable:", CalendarService.edsAvailable)
-      console.log("Events: CalendarService.allEvents length:", CalendarService.allEvents ? CalendarService.allEvents.length : "undefined")
-      console.log("Events: CalendarService.eventsByDate keys:", Object.keys(CalendarService.eventsByDate))
-    }
     updateSelectedDateEvents()
   }
   onSelectedDateChanged: {
@@ -55,7 +48,7 @@ Rectangle {
       updateSelectedDateEvents()
     }
 
-    function onEdsAvailableChanged() {
+    function onInitializedChanged() {
       updateSelectedDateEvents()
     }
 

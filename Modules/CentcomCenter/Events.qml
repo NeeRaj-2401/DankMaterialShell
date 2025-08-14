@@ -83,6 +83,72 @@ Rectangle {
       font.weight: Font.Medium
       anchors.verticalCenter: parent.verticalCenter
     }
+    
+    Item { width: Theme.spacingM; height: 1 } // Spacer
+    
+    // Calendar legend
+    Row {
+      spacing: Theme.spacingM
+      anchors.verticalCenter: parent.verticalCenter
+      visible: CalendarEDSService.calendars.length > 0 && hasEvents
+      
+      Repeater {
+        model: {
+          // Get unique calendars from today's events
+          const uniqueCals = new Map()
+          for (const event of selectedDateEvents) {
+            if (event.calendar_uid && !uniqueCals.has(event.calendar_uid)) {
+              const cal = CalendarEDSService.calendars.find(c => c.uid === event.calendar_uid)
+              if (cal) {
+                uniqueCals.set(event.calendar_uid, {
+                  name: cal.name,
+                  color: event.calendar_color || CalendarEDSService.getCalendarColor(event.calendar_uid)
+                })
+              }
+            }
+          }
+          return Array.from(uniqueCals.values())
+        }
+        
+        Rectangle {
+          width: calLegendRow.width + Theme.spacingS * 2
+          height: 20
+          radius: 10
+          color: Qt.rgba(modelData.color ? Qt.lighter(modelData.color, 1.8).r : Theme.primary.r,
+                        modelData.color ? Qt.lighter(modelData.color, 1.8).g : Theme.primary.g,
+                        modelData.color ? Qt.lighter(modelData.color, 1.8).b : Theme.primary.b,
+                        0.15)
+          border.width: 1
+          border.color: Qt.rgba(modelData.color ? Qt.lighter(modelData.color, 1.2).r : Theme.primary.r,
+                               modelData.color ? Qt.lighter(modelData.color, 1.2).g : Theme.primary.g,
+                               modelData.color ? Qt.lighter(modelData.color, 1.2).b : Theme.primary.b,
+                               0.3)
+          
+          Row {
+            id: calLegendRow
+            anchors.centerIn: parent
+            spacing: 4
+            
+            Rectangle {
+              width: 8
+              height: 8
+              radius: 4
+              color: modelData.color || Theme.primary
+              anchors.verticalCenter: parent.verticalCenter
+            }
+            
+            StyledText {
+              text: modelData.name || "Unknown"
+              font.pixelSize: Theme.fontSizeSmall - 1
+              color: Qt.rgba(Theme.surfaceText.r, Theme.surfaceText.g,
+                            Theme.surfaceText.b, 0.8)
+              font.weight: Font.Medium
+              anchors.verticalCenter: parent.verticalCenter
+            }
+          }
+        }
+      }
+    }
   }
 
   Column {
@@ -191,14 +257,29 @@ Rectangle {
       border.width: 1
 
       Rectangle {
-        width: 4
-        height: parent.height - 8
-        anchors.left: parent.left
-        anchors.leftMargin: 4
-        anchors.verticalCenter: parent.verticalCenter
-        radius: 2
-        color: Theme.primary
-        opacity: 0.8
+        anchors.fill: parent
+        radius: parent.radius
+        visible: modelData.calendar_color !== undefined
+        opacity: 1
+
+        gradient: Gradient {
+          orientation: Gradient.Horizontal
+
+          GradientStop {
+            position: 0
+            color: modelData.calendar_color || Theme.primary
+          }
+
+          GradientStop {
+            position: 0.008  // Even thinner
+            color: modelData.calendar_color || Theme.primary
+          }
+
+          GradientStop {
+            position: 0.009  // Just a very thin line
+            color: "transparent"
+          }
+        }
       }
 
       Column {
@@ -207,7 +288,7 @@ Rectangle {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.verticalCenter: parent.verticalCenter
-        anchors.leftMargin: Theme.spacingL + 4
+        anchors.leftMargin: Theme.spacingL + 8
         anchors.rightMargin: Theme.spacingM
         spacing: 6
 
@@ -309,6 +390,7 @@ Rectangle {
           }
         }
       }
+      
 
       Behavior on color {
         ColorAnimation {

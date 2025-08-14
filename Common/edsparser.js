@@ -12,50 +12,101 @@ function parseOpenCalendar(raw) {
 }
 
 function extractCalendarSources(raw) {
-  // Grep UIDs that have a [Calendar] section nearby
+  // EXACTLY like calendar-cli.sh lines 128-142: only find sources with [Calendar] sections
   const text = raw.replace(/, /g, "\n")
   const uids = []
-  const regex = /UID.*<'([a-f0-9]{32,40})'>/g
+  
+  // Parse the D-Bus response to find ALL sources with Calendar sections in their Data (lines 128-142)
+  const regex = /UID.*<'([a-f0-9-]{32,40}|system-calendar)'>/g
   let match
   while ((match = regex.exec(text)) !== null) {
-    uids.push(match[1])
-  }
-  const unique = Array.from(new Set(uids))
-  const result = []
-  unique.forEach(uid => {
+    const uid = match[1]
+    
+    // Check if this source has a [Calendar] section in its Data
     const idx = text.indexOf(uid)
-    if (idx < 0) return
-    const chunk = text.slice(Math.max(0, idx - 2500), idx + 5000)
-    if (chunk.indexOf("[Calendar]") >= 0) result.push(uid)
-  })
-  if (result.indexOf("system-calendar") < 0) result.push("system-calendar")
-  return Array.from(new Set(result))
+    if (idx >= 0) {
+      const chunk = text.slice(Math.max(0, idx - 2500), idx + 5000)
+      if (chunk.indexOf("[Calendar]") >= 0) {
+        uids.push(uid)
+      }
+    }
+  }
+  
+  // Always include system-calendar since we know it works
+  if (!uids.includes("system-calendar")) {
+    uids.push("system-calendar")
+  }
+  
+  return Array.from(new Set(uids))
 }
 
 function extractCalendarMeta(raw, uids) {
   const text = raw.replace(/, /g, "\n")
   return uids.map(uid => {
-    const idx = text.indexOf(uid)
     let display = ""
     let backend = "unknown"
-    if (idx >= 0) {
-      const chunk = text.slice(Math.max(0, idx - 2500), idx + 5000)
-      const dataMatch = chunk.match(/Data.*<'([^']+)'>/)
+    
+    // Get the source section for this specific UID - EXACTLY like calendar-cli.sh line 193
+    const uidRegex = new RegExp(`UID.*<'${uid.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}'>`)
+    const lines = text.split('\n')
+    let startIndex = -1
+    
+    for (let i = 0; i < lines.length; i++) {
+      if (uidRegex.test(lines[i])) {
+        startIndex = i
+        break
+      }
+    }
+    
+    if (startIndex >= 0) {
+      // Get the next 50 lines after finding the UID (same as grep -A 50)
+      const uidSection = lines.slice(startIndex, startIndex + 50).join('\n')
+      
+      // Extract the Data section content - EXACTLY like calendar-cli.sh lines 197-198
+      // raw_data=$(echo "$uid_section" | grep "Data.*=" | sed "s/.*Data.*<'//; s/'>.*//; s/\\n/\n/g")
+      const dataMatch = uidSection.match(/'Data':\s*<'([^']*(?:\\.[^']*)*)'>/)
       if (dataMatch) {
-        const data = dataMatch[1].replace(/\\n/g, "\n")
-        const dn = (data.match(/^DisplayName=(.+)$/m) || [])[1]
-        if (dn) display = dn
-        const calSection = data.split(/\n\[Calendar\]\n/)[1] || ""
-        const backendName = (calSection.match(/^BackendName=(.+)$/m) || [])[1]
-        if (backendName) {
-          if (backendName === "local") backend = "local"
-          else if (backendName === "caldav") {
-            backend = data.indexOf("Parent=f573c08fa5e0706a96f6539b4c3240995be086ea") >= 0 ? "google" : "caldav"
-          } else backend = backendName
+        let rawData = dataMatch[1]
+        // Apply the same sed transformations: s/\\n/\n/g
+        rawData = rawData.replace(/\\n/g, '\n')
+        
+        // Extract DisplayName= (the main English version) - EXACTLY like calendar-cli.sh line 202
+        const displayNameMatch = rawData.match(/^DisplayName=(.+)$/m)
+        if (displayNameMatch) {
+          display = displayNameMatch[1]
+        }
+        
+        // Extract BackendName from the Calendar section - EXACTLY like calendar-cli.sh lines 205-224
+        const calendarSectionMatch = rawData.match(/\[Calendar\]\n([\s\S]*?)(?:\n\[|$)/)
+        if (calendarSectionMatch) {
+          const calendarSection = calendarSectionMatch[1]
+          const backendMatch = calendarSection.match(/^BackendName=(.+)$/m)
+          if (backendMatch) {
+            const backendName = backendMatch[1]
+            switch (backendName) {
+              case "local":
+                backend = "local"
+                break
+              case "contacts":
+                backend = "contacts"
+                break
+              case "caldav":
+                backend = "caldav"
+                break
+              default:
+                backend = "unknown"
+                break
+            }
+          }
         }
       }
     }
-    if (!display) display = "Calendar " + uid
+    
+    // Fallback to a generic name if we couldn't extract it - same as calendar-cli.sh line 229
+    if (!display || display.trim() === "") {
+      display = "Calendar " + uid
+    }
+    
     return { uid: uid, name: display, backend: backend, enabled: true }
   })
 }

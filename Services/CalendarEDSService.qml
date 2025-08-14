@@ -10,9 +10,42 @@ Singleton {
   id: root
 
   // -------- public state
-  property var calendars: []        // [{uid,name,backend,enabled}]
+  property var calendars: []        // [{uid,name,backend,enabled,color}]
   property var eventsByUid: ({})    // { uid: [event,...] }
   property string lastError: ""
+  
+  readonly property var calendarColors: [
+    "#6366F1",
+    "#10B981",
+    "#F59E0B",
+    "#EF4444",
+    "#8B5CF6",
+    "#06B6D4",
+    "#F97316",
+    "#84CC16",
+    "#EC4899",
+    "#64748B",
+    "#14B8A6",
+    "#A855F7",
+    "#22C55E",
+    "#F472B6",
+    "#6B7280"
+  ]
+  
+  // Helper to get consistent color for calendar
+  function getCalendarColor(calendarUid) {
+    const cal = calendars.find(c => c.uid === calendarUid)
+    if (cal && cal.color) return cal.color
+    
+    const sortedCals = calendars.slice().sort((a, b) => {
+      const nameCompare = a.name.localeCompare(b.name)
+      if (nameCompare !== 0) return nameCompare
+      return a.uid.localeCompare(b.uid)
+    })
+    const index = sortedCals.findIndex(c => c.uid === calendarUid)
+    if (index === -1) return calendarColors[0]
+    return calendarColors[index % calendarColors.length]
+  }
 
   // -------- signals
   signal calendarsChangedExternally()
@@ -131,6 +164,7 @@ Singleton {
           const items = vevents.map(v => {
             const ev = Lib.EDSParser.ICS.parseEvent(v)
             ev.calendar_uid = uid
+            ev.calendar_color = getCalendarColor(uid)
             return ev
           }).filter(ev => {
             if (!getEventsProc.searchQuery) return true
@@ -337,9 +371,29 @@ Singleton {
         }
         _pendingEventCreation = null
       } else if (_listCalendarsRawOutput) {
-        // Finish listCalendars operation - include ALL discovered calendars, not just working ones
+        // Finish listCalendars operation - only include working calendar sources like calendar-cli.sh
         const allDiscoveredCalendars = Lib.EDSParser.extractCalendarSources(_listCalendarsRawOutput)
-        calendars = Lib.EDSParser.extractCalendarMeta(_listCalendarsRawOutput, allDiscoveredCalendars)
+        let allCals = Lib.EDSParser.extractCalendarMeta(_listCalendarsRawOutput, allDiscoveredCalendars)
+        
+        // Filter to only include calendars that can actually be used (have proper backends)
+        let cals = allCals.filter(cal => {
+          // Include local calendars, caldav calendars, but exclude unknown backends and address books
+          return cal.backend === "local" || cal.backend === "caldav" || cal.backend === "contacts"
+        })
+        
+        
+        let sortedCals = cals.slice().sort((a, b) => {
+          const nameCompare = a.name.localeCompare(b.name)
+          if (nameCompare !== 0) return nameCompare
+          return a.uid.localeCompare(b.uid)
+        })
+        
+        cals.forEach(cal => {
+          const index = sortedCals.findIndex(sc => sc.uid === cal.uid)
+          cal.color = calendarColors[index % calendarColors.length]
+        })
+        
+        calendars = cals
         _listCalendarsRawOutput = ""
         
         // Automatically fetch events for the current time period
@@ -620,6 +674,11 @@ Singleton {
       
       // Add title property for compatibility
       convertedEvent.title = convertedEvent.summary || "Untitled Event"
+      
+      // Ensure calendar color is set
+      if (!convertedEvent.calendar_color) {
+        convertedEvent.calendar_color = getCalendarColor(convertedEvent.calendar_uid)
+      }
       
       return convertedEvent
     })

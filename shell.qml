@@ -264,4 +264,12 @@ ShellRoot {
       modelData: item
     }
   }
+
+  Variants {
+    model: Quickshell.screens
+
+    delegate: IdleInhibitorPopup {
+      modelData: item
+    }
+  }
 }

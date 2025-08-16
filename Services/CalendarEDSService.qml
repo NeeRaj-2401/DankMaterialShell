@@ -105,6 +105,7 @@ Singleton {
         if (m) {
           root._workingCalendars.push(openCalendarProc.currentUid)
           root._calendarConnections[openCalendarProc.currentUid] = m
+        } else {
         }
         root._openNextCalendar(openCalendarProc.continueToEvents, openCalendarProc.continueToCreate)
       }
@@ -141,6 +142,7 @@ Singleton {
     stdout: StdioCollector {
       id: getEventsOutput
       onStreamFinished: {
+        
         // Parse the combined output - each calendar's output is separated by "---CALENDAR:uid---"
         const sections = text.split("---CALENDAR:")
         const collectedEvents = {}
@@ -153,6 +155,7 @@ Singleton {
           
           const uid = section.substring(0, uidEndIndex)
           const rawData = section.substring(uidEndIndex + 3) // Skip "---"
+          
           
           if (rawData.trim().length === 0) {
             collectedEvents[uid] = []
@@ -172,6 +175,9 @@ Singleton {
             return hay.toLowerCase().indexOf(getEventsProc.searchQuery.toLowerCase()) !== -1
           })
           
+          if (items.length > 0) {
+          }
+          
           collectedEvents[uid] = items
         }
         
@@ -181,6 +187,7 @@ Singleton {
           const newEvents = collectedEvents[uid]
           const existingEvents = mergedEvents[uid] || []
           
+          
           // Create a map of existing events by UID to avoid duplicates
           const existingEventMap = new Map()
           existingEvents.forEach(event => {
@@ -188,9 +195,11 @@ Singleton {
           })
           
           // Add new events that don't already exist
+          let addedCount = 0
           newEvents.forEach(newEvent => {
             if (!newEvent.uid || !existingEventMap.has(newEvent.uid)) {
               existingEvents.push(newEvent)
+              addedCount++
             }
           })
           
@@ -198,6 +207,7 @@ Singleton {
         }
         
         eventsByUid = mergedEvents
+        
         _fetchingEvents = false
         eventsUpdated()
       }
@@ -378,7 +388,8 @@ Singleton {
         // Filter to only include calendars that can actually be used (have proper backends)
         let cals = allCals.filter(cal => {
           // Include local calendars, caldav calendars, but exclude unknown backends and address books
-          return cal.backend === "local" || cal.backend === "caldav" || cal.backend === "contacts"
+          const include = cal.backend === "local" || cal.backend === "caldav" || cal.backend === "contacts"
+          return include
         })
         
         
@@ -602,7 +613,23 @@ Singleton {
       }
       
       // Check if target date falls within the event range (inclusive)
-      return targetDate >= startDate && targetDate <= endDate
+      const basicMatch = targetDate >= startDate && targetDate <= endDate
+      if (basicMatch) return true
+      
+      // Handle yearly recurring events (RRULE:FREQ=YEARLY)
+      // Check if this event has yearly recurrence by looking at the raw event data
+      if (event.rrule && event.rrule.includes("FREQ=YEARLY")) {
+        const targetDateObj = new Date(targetDate)
+        const eventStartObj = new Date(startDate)
+        
+        // For yearly recurrence, check if month and day match regardless of year
+        if (targetDateObj.getMonth() === eventStartObj.getMonth() && 
+            targetDateObj.getDate() === eventStartObj.getDate()) {
+          return true
+        }
+      }
+      
+      return false
     }).map(event => {
       // Convert event properties to the format expected by Events.qml
       const convertedEvent = Object.assign({}, event)
@@ -670,6 +697,31 @@ Singleton {
       } else {
         // Default end time to start time if not provided
         convertedEvent.end = convertedEvent.start
+      }
+      
+      // Handle yearly recurring events - update dates to current year if this is a recurrence match
+      if (event.rrule && event.rrule.includes("FREQ=YEARLY") && convertedEvent.start) {
+        const targetDateObj = new Date(date)
+        const eventStartObj = convertedEvent.start
+        
+        // If this is a yearly recurring event and the month/day matches the target date,
+        // update the event dates to the target year
+        if (targetDateObj.getMonth() === eventStartObj.getMonth() && 
+            targetDateObj.getDate() === eventStartObj.getDate()) {
+          
+          // Update start date to target year
+          const newStart = new Date(eventStartObj)
+          newStart.setFullYear(targetDateObj.getFullYear())
+          convertedEvent.start = newStart
+          
+          // Update end date to target year if it exists
+          if (convertedEvent.end) {
+            const timeDiff = convertedEvent.end.getTime() - eventStartObj.getTime()
+            convertedEvent.end = new Date(newStart.getTime() + timeDiff)
+          } else {
+            convertedEvent.end = newStart
+          }
+        }
       }
       
       // Add title property for compatibility

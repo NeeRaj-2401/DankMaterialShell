@@ -113,13 +113,23 @@ function extractCalendarMeta(raw, uids) {
 
 function extractVEVENTs(raw) {
   const out = []
-  const re = /'([^']*BEGIN:VEVENT[^']*END:VEVENT[^']*)'/g
+  // Handle both single and double quoted VEVENTs from gdbus response
+  const reSingle = /'([^']*BEGIN:VEVENT[^']*END:VEVENT[^']*)'/g
+  const reDouble = /"([^"]*BEGIN:VEVENT[^"]*END:VEVENT[^"]*)"/g
+  
   let m
-  while ((m = re.exec(raw)) !== null) {
-    // Properly handle escaped sequences: \r\n, \n, and \r
+  // Extract single-quoted VEVENTs
+  while ((m = reSingle.exec(raw)) !== null) {
     const cleaned = m[1].replace(/\\r\\n/g, "\n").replace(/\\n/g, "\n").replace(/\\r/g, "\n")
     out.push(cleaned)
   }
+  
+  // Extract double-quoted VEVENTs
+  while ((m = reDouble.exec(raw)) !== null) {
+    const cleaned = m[1].replace(/\\r\\n/g, "\n").replace(/\\n/g, "\n").replace(/\\r/g, "\n")
+    out.push(cleaned)
+  }
+  
   return out
 }
 
@@ -149,13 +159,18 @@ function _parseDt(v){
     const y=v.slice(0,4), m=v.slice(4,6), d=v.slice(6,8), hh=v.slice(9,11), mi=v.slice(11,13), ss=v.slice(13,15)
     const z=v.endsWith("Z")?"Z":""; return { iso:`${y}-${m}-${d}T${hh}:${mi}:${ss}${z}`, allDay:false }
   }
+  // Handle timezone-local format YYYYMMDDTHHMMSS (without Z)
+  if (/^\d{8}T\d{6}$/.test(v)) {
+    const y=v.slice(0,4), m=v.slice(4,6), d=v.slice(6,8), hh=v.slice(9,11), mi=v.slice(11,13), ss=v.slice(13,15)
+    return { iso:`${y}-${m}-${d}T${hh}:${mi}:${ss}`, allDay:false }
+  }
   return { iso:v, allDay:false }
 }
 function parseEvent(ics) {
   // Handle both literal \r\n sequences and actual CRLF
   const normalizedIcs = ics.replace(/\\r\\n/g, '\n').replace(/\r\n/g, '\n').replace(/\r/g, '\n')
   const lines = normalizedIcs.split('\n')
-  const ev = { uid:"", summary:"", description:"", location:"", status:"CONFIRMED", start:"", end:"" }
+  const ev = { uid:"", summary:"", description:"", location:"", status:"CONFIRMED", start:"", end:"", rrule:"" }
   
   let inValarm = false
   
@@ -198,8 +213,25 @@ function parseEvent(ics) {
         .trim()                   // Final trim
     }
     else if (line.startsWith("STATUS:")) ev.status = _kv(line).value.trim()
+    else if (line.startsWith("RRULE:")) ev.rrule = _kv(line).value.trim()
     else if (line.startsWith("DTSTART;VALUE=DATE:")) ev.start = _parseDt(_kv(line).value.trim()).iso
     else if (line.startsWith("DTEND;VALUE=DATE:")) ev.end = _parseDt(_kv(line).value.trim()).iso
+    else if (line.startsWith("DTSTART;")) {
+      // Handle timezone-aware DTSTART;TZID=America/New_York:20101028T083000
+      const colonIndex = line.indexOf(":")
+      if (colonIndex > 0) {
+        const dateValue = line.substring(colonIndex + 1).trim()
+        ev.start = _parseDt(dateValue).iso
+      }
+    }
+    else if (line.startsWith("DTEND;")) {
+      // Handle timezone-aware DTEND;TZID=America/New_York:20101028T083000
+      const colonIndex = line.indexOf(":")
+      if (colonIndex > 0) {
+        const dateValue = line.substring(colonIndex + 1).trim()
+        ev.end = _parseDt(dateValue).iso
+      }
+    }
     else if (line.startsWith("DTSTART:")) ev.start = _parseDt(_kv(line).value.trim()).iso
     else if (line.startsWith("DTEND:")) ev.end = _parseDt(_kv(line).value.trim()).iso
   }

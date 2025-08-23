@@ -178,7 +178,7 @@ Item {
                                                                    Theme.primary.r,
                                                                    Theme.primary.g,
                                                                    Theme.primary.b,
-                                                                   0.12) : (nightModeToggle.containsMouse ? Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.08) : Qt.rgba(Theme.surfaceVariant.r, Theme.surfaceVariant.g, Theme.surfaceVariant.b, 0.08))
+                                                                   0.12) : (nightModeToggle.containsMouse && !SessionData.nightModeAutoEnabled ? Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.08) : Qt.rgba(Theme.surfaceVariant.r, Theme.surfaceVariant.g, Theme.surfaceVariant.b, SessionData.nightModeAutoEnabled ? 0.04 : 0.08))
                     border.color: BrightnessService.nightModeActive ? Theme.primary : "transparent"
                     border.width: BrightnessService.nightModeActive ? 1 : 0
 
@@ -190,6 +190,7 @@ Item {
                             name: BrightnessService.nightModeActive ? "nightlight" : "dark_mode"
                             size: Theme.iconSizeLarge
                             color: BrightnessService.nightModeActive ? Theme.primary : Theme.surfaceText
+                            opacity: SessionData.nightModeAutoEnabled ? 0.6 : 1.0
                             anchors.horizontalCenter: parent.horizontalCenter
                         }
 
@@ -197,6 +198,7 @@ Item {
                             text: "Night Mode"
                             font.pixelSize: Theme.fontSizeMedium
                             color: BrightnessService.nightModeActive ? Theme.primary : Theme.surfaceText
+                            opacity: SessionData.nightModeAutoEnabled ? 0.6 : 1.0
                             font.weight: Font.Medium
                             anchors.horizontalCenter: parent.horizontalCenter
                         }
@@ -207,9 +209,13 @@ Item {
 
                         anchors.fill: parent
                         hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
+                        cursorShape: SessionData.nightModeAutoEnabled ? Qt.ForbiddenCursor : Qt.PointingHandCursor
                         onClicked: {
-                            BrightnessService.toggleNightMode()
+                            if (SessionData.nightModeAutoEnabled) {
+                                ToastService.showWarning("Night Mode is controlled by automation \nDisable scheduled Night Mode in Settings")
+                            } else {
+                                BrightnessService.toggleNightMode()
+                            }
                         }
                     }
                 }

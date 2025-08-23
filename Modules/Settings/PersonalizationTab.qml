@@ -81,8 +81,9 @@ Item {
     }
 
     Component.onCompleted: {
-        // Access WallpaperCyclingService to ensure it's initialized
+        // Access services to ensure they're initialized
         WallpaperCyclingService.cyclingActive
+        NightModeAutomationService.automationActive
         if (!fontsEnumerated) {
             enumerateFonts()
             fontsEnumerated = true
@@ -686,8 +687,15 @@ Item {
 
                         width: parent.width
                         text: "Night Mode"
-                        description: "Apply warm color temperature to reduce eye strain"
+                        description: {
+                            if (SessionData.nightModeAutoEnabled)
+                                return "Controlled by automatic scheduling - disable automation to use manual control"
+                            else
+                                return "Apply warm color temperature to reduce eye strain"
+                        }
                         checked: BrightnessService.nightModeActive
+                        enabled: !SessionData.nightModeAutoEnabled
+                        opacity: enabled ? 1.0 : 0.6
                         onToggled: checked => {
                                        if (checked !== BrightnessService.nightModeActive) {
                                            if (checked)
@@ -709,9 +717,16 @@ Item {
                     DankDropdown {
                         width: parent.width
                         text: "Night Mode Temperature"
-                        description: BrightnessService.nightModeActive ? "Disable night mode to adjust" : "Set temperature for night mode"
-                        enabled: !BrightnessService.nightModeActive
-                        opacity: !BrightnessService.nightModeActive ? 1 : 0.6
+                        description: {
+                            if (SessionData.nightModeAutoEnabled)
+                                return "Temperature controlled by automatic scheduling"
+                            else if (BrightnessService.nightModeActive)
+                                return "Disable night mode to adjust"
+                            else
+                                return "Set temperature for night mode"
+                        }
+                        enabled: !BrightnessService.nightModeActive && !SessionData.nightModeAutoEnabled
+                        opacity: enabled ? 1 : 0.6
                         currentValue: SessionData.nightModeTemperature + "K"
                         options: {
                             var temps = []
@@ -726,6 +741,261 @@ Item {
                                             SessionData.setNightModeTemperature(
                                                 temp)
                                         }
+                    }
+
+                    Rectangle {
+                        width: parent.width
+                        height: 1
+                        color: Theme.outline
+                        opacity: 0.2
+                    }
+
+                    Column {
+                        width: parent.width
+                        spacing: Theme.spacingM
+
+                        Row {
+                            width: parent.width
+                            spacing: Theme.spacingM
+
+                            DankIcon {
+                                name: "schedule"
+                                size: Theme.iconSize
+                                color: SessionData.nightModeAutoEnabled ? Theme.primary : Theme.surfaceVariantText
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+
+                            Column {
+                                width: parent.width - Theme.iconSize - Theme.spacingM
+                                       - autoToggle.width - Theme.spacingM
+                                spacing: Theme.spacingXS
+                                anchors.verticalCenter: parent.verticalCenter
+
+                                StyledText {
+                                    text: "Automatic Night Mode"
+                                    font.pixelSize: Theme.fontSizeLarge
+                                    font.weight: Font.Medium
+                                    color: Theme.surfaceText
+                                }
+
+                                StyledText {
+                                    text: "Automatically enable night mode based on time or location"
+                                    font.pixelSize: Theme.fontSizeSmall
+                                    color: Theme.surfaceVariantText
+                                    width: parent.width
+                                }
+                            }
+
+                            DankToggle {
+                                id: autoToggle
+
+                                anchors.verticalCenter: parent.verticalCenter
+                                checked: SessionData.nightModeAutoEnabled
+                                onToggled: toggled => {
+                                               SessionData.setNightModeAutoEnabled(toggled)
+                                           }
+                            }
+                        }
+
+                        Column {
+                            width: parent.width
+                            spacing: Theme.spacingS
+                            visible: SessionData.nightModeAutoEnabled
+                            leftPadding: Theme.iconSize + Theme.spacingM
+
+                            Row {
+                                spacing: Theme.spacingL
+                                width: parent.width - parent.leftPadding
+
+                                StyledText {
+                                    text: "Mode:"
+                                    font.pixelSize: Theme.fontSizeMedium
+                                    color: Theme.surfaceText
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+
+                                DankTabBar {
+                                    id: nightModeTabBar
+
+                                    width: 250
+                                    height: 32
+                                    model: [
+                                        { "text": "Manual", "enabled": true },
+                                        { "text": "Time", "enabled": NightModeAutomationService.gammaStepAvailable },
+                                        { "text": "Location", "enabled": NightModeAutomationService.gammaStepAvailable }
+                                    ]
+                                    currentIndex: {
+                                        switch(SessionData.nightModeAutoMode) {
+                                            case "time": return 1
+                                            case "location": return 2
+                                            default: return 0
+                                        }
+                                    }
+                                    onTabClicked: index => {
+                                                      // Don't allow clicking disabled tabs
+                                                      if (index > 0 && !NightModeAutomationService.gammaStepAvailable) return
+                                                      
+                                                      let mode = "manual"
+                                                      switch(index) {
+                                                          case 1: mode = "time"; break
+                                                          case 2: mode = "location"; break
+                                                      }
+                                                      SessionData.setNightModeAutoMode(mode)
+                                                  }
+                                }
+                            }
+
+                            // Time-based settings
+                            Row {
+                                spacing: Theme.spacingM
+                                visible: SessionData.nightModeAutoMode === "time"
+                                width: parent.width - parent.leftPadding
+
+                                Column {
+                                    spacing: Theme.spacingS
+
+                                    StyledText {
+                                        text: "Start time:"
+                                        font.pixelSize: Theme.fontSizeMedium
+                                        color: Theme.surfaceText
+                                    }
+
+                                    DankTextField {
+                                        width: 100
+                                        height: 40
+                                        text: SessionData.nightModeStartTime
+                                        placeholderText: "20:00"
+                                        maximumLength: 5
+                                        topPadding: Theme.spacingS
+                                        bottomPadding: Theme.spacingS
+                                        onAccepted: {
+                                            var isValid = /^([0-1][0-9]|2[0-3]):[0-5][0-9]$/.test(text)
+                                            if (isValid)
+                                                SessionData.setNightModeStartTime(text)
+                                            else
+                                                text = SessionData.nightModeStartTime
+                                        }
+                                        onEditingFinished: {
+                                            var isValid = /^([0-1][0-9]|2[0-3]):[0-5][0-9]$/.test(text)
+                                            if (isValid)
+                                                SessionData.setNightModeStartTime(text)
+                                            else
+                                                text = SessionData.nightModeStartTime
+                                        }
+
+                                        validator: RegularExpressionValidator {
+                                            regularExpression: /^([0-1][0-9]|2[0-3]):[0-5][0-9]$/
+                                        }
+                                    }
+                                }
+
+                                Column {
+                                    spacing: Theme.spacingS
+
+                                    StyledText {
+                                        text: "End time:"
+                                        font.pixelSize: Theme.fontSizeMedium
+                                        color: Theme.surfaceText
+                                    }
+
+                                    DankTextField {
+                                        width: 100
+                                        height: 40
+                                        text: SessionData.nightModeEndTime
+                                        placeholderText: "06:00"
+                                        maximumLength: 5
+                                        topPadding: Theme.spacingS
+                                        bottomPadding: Theme.spacingS
+                                        onAccepted: {
+                                            var isValid = /^([0-1][0-9]|2[0-3]):[0-5][0-9]$/.test(text)
+                                            if (isValid)
+                                                SessionData.setNightModeEndTime(text)
+                                            else
+                                                text = SessionData.nightModeEndTime
+                                        }
+                                        onEditingFinished: {
+                                            var isValid = /^([0-1][0-9]|2[0-3]):[0-5][0-9]$/.test(text)
+                                            if (isValid)
+                                                SessionData.setNightModeEndTime(text)
+                                            else
+                                                text = SessionData.nightModeEndTime
+                                        }
+
+                                        validator: RegularExpressionValidator {
+                                            regularExpression: /^([0-1][0-9]|2[0-3]):[0-5][0-9]$/
+                                        }
+                                    }
+                                }
+
+                                StyledText {
+                                    text: "24-hour format"
+                                    font.pixelSize: Theme.fontSizeSmall
+                                    color: Theme.surfaceVariantText
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                            }
+
+                            // Location-based settings
+                            Column {
+                                spacing: Theme.spacingS
+                                visible: SessionData.nightModeAutoMode === "location"
+                                width: parent.width - parent.leftPadding
+
+                                StyledText {
+                                    text: "Uses gammastep with geoclue2 to automatically adjust based on your location and the sun's position. This provides smooth gradual transitions at sunset and sunrise."
+                                    font.pixelSize: Theme.fontSizeSmall
+                                    color: Theme.surfaceText
+                                    wrapMode: Text.WordWrap
+                                    width: parent.width
+                                }
+
+                                StyledText {
+                                    text: !NightModeAutomationService.gammaStepAvailable ? 
+                                          "⚠ Night mode not supported - display does not support gamma adjustment or gammastep not detected" :
+                                          "⚠ gammastep not detected - automatic scheduling unavailable"
+                                    font.pixelSize: Theme.fontSizeSmall
+                                    color: Theme.error
+                                    visible: !NightModeAutomationService.gammaStepAvailable
+                                    width: parent.width
+                                    wrapMode: Text.WordWrap
+                                }
+
+                                StyledText {
+                                    text: "⚠ geoclue2 not detected - location services may not work properly. You can still use time-based scheduling."
+                                    font.pixelSize: Theme.fontSizeSmall
+                                    color: Theme.surfaceVariantText
+                                    visible: NightModeAutomationService.gammaStepAvailable && !NightModeAutomationService.geoClue2Available
+                                    width: parent.width
+                                    wrapMode: Text.WordWrap
+                                }
+
+                                StyledText {
+                                    text: "✓ Location-based night mode ready"
+                                    font.pixelSize: Theme.fontSizeSmall
+                                    color: Theme.primary
+                                    visible: NightModeAutomationService.gammaStepAvailable && NightModeAutomationService.geoClue2Available
+                                    width: parent.width
+                                }
+                            }
+
+                            // Status for time mode
+                            StyledText {
+                                text: SessionData.nightModeAutoMode === "time" && !NightModeAutomationService.gammaStepAvailable ? 
+                                      "⚠ gammastep not detected - automatic scheduling unavailable" : ""
+                                font.pixelSize: Theme.fontSizeSmall
+                                color: Theme.error
+                                visible: SessionData.nightModeAutoMode === "time" && !NightModeAutomationService.gammaStepAvailable
+                                width: parent.width - parent.leftPadding
+                                wrapMode: Text.WordWrap
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        width: parent.width
+                        height: 1
+                        color: Theme.outline
+                        opacity: 0.2
                     }
 
                     DankToggle {

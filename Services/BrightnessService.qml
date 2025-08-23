@@ -217,6 +217,12 @@ Singleton {
         if (nightModeActive)
             return
 
+        // Check if automation is running - if so, we shouldn't interfere
+        if (SessionData.nightModeAutoEnabled) {
+            console.warn("BrightnessService: Night mode automation is active, manual control disabled")
+            return
+        }
+
         // Test if gammastep exists before enabling
         gammaStepTestProcess.running = true
     }
@@ -237,11 +243,17 @@ Singleton {
     }
 
     function disableNightMode() {
+        // Don't allow manual disable if automation is running
+        if (SessionData.nightModeAutoEnabled) {
+            console.warn("BrightnessService: Night mode automation is active, manual control disabled")
+            return
+        }
+
         nightModeActive = false
         SessionData.setNightModeEnabled(false)
 
-        // Also kill any stray gammastep processes
-        Quickshell.execDetached(["pkill", "gammastep"])
+        // Only kill manual gammastep processes (ones with -O flag)
+        Quickshell.execDetached(["pkill", "-f", "gammastep.*-O"])
     }
 
     function toggleNightMode() {
@@ -256,8 +268,8 @@ Singleton {
         ddcDetectionProcess.running = true
         refreshDevices()
 
-        // Check if night mode was enabled on startup
-        if (SessionData.nightModeEnabled) {
+        // Check if night mode was enabled on startup (but only if automation isn't active)
+        if (SessionData.nightModeEnabled && !SessionData.nightModeAutoEnabled) {
             enableNightMode()
         }
     }
@@ -581,18 +593,49 @@ Singleton {
 
         command: {
             const temperature = SessionData.nightModeTemperature || 4500
-            return ["gammastep", "-m", "wayland", "-O", String(temperature)]
+            return ["gammastep", "-O", String(temperature)]
         }
         running: nightModeActive
+
+        stderr: StdioCollector {
+            onStreamFinished: {
+                if (text && text.trim()) {
+                    console.warn("BrightnessService: Gammastep stderr:", text.trim())
+                    
+                    // Check for the "zero outputs" issue
+                    if (text.includes("Zero outputs support gamma adjustment") || 
+                        text.includes("do not support gamma adjustment")) {
+                        console.warn("BrightnessService: Display does not support gamma adjustment")
+                        nightModeActive = false
+                        SessionData.setNightModeEnabled(false)
+                        ToastService.showWarning("Night mode not supported - display does not support gamma adjustment")
+                    }
+                }
+            }
+        }
 
         onExited: function (exitCode) {
             // If process exits with non-zero code while we think it should be running
             if (nightModeActive && exitCode !== 0) {
                 console.warn("BrightnessService: Night mode process crashed with exit code:",
                              exitCode)
-                nightModeActive = false
-                SessionData.setNightModeEnabled(false)
-                ToastService.showWarning("Night mode failed: process crashed")
+                
+                // Try fallback methods
+                if (!gammaStepProcess.command.includes("-m")) {
+                    console.log("BrightnessService: Trying fallback with randr method")
+                    const temperature = SessionData.nightModeTemperature || 4500
+                    gammaStepProcess.command = ["gammastep", "-m", "randr", "-O", String(temperature)]
+                    gammaStepProcess.running = true
+                } else if (gammaStepProcess.command.includes("randr")) {
+                    console.log("BrightnessService: Trying fallback with vidmode method")
+                    const temperature = SessionData.nightModeTemperature || 4500
+                    gammaStepProcess.command = ["gammastep", "-m", "vidmode", "-O", String(temperature)]
+                    gammaStepProcess.running = true
+                } else {
+                    nightModeActive = false
+                    SessionData.setNightModeEnabled(false)
+                    ToastService.showWarning("Night mode failed: display does not support gamma adjustment")
+                }
             }
         }
     }

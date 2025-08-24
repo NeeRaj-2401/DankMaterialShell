@@ -22,10 +22,12 @@ PanelWindow {
     property real backgroundTransparency: SettingsData.topBarTransparency
     readonly property int notificationCount: NotificationService.notifications.length
     property bool autoHide: SettingsData.topBarAutoHide
-    property bool reveal: !autoHide || topBarMouseArea.containsMouse
+    property bool reveal: SettingsData.topBarVisible && (!autoHide || topBarMouseArea.containsMouse)
+    readonly property real effectiveBarHeight: Math.max(root.widgetHeight + SettingsData.topBarInnerPadding + 4, Theme.barHeight - 4 - (8 - SettingsData.topBarInnerPadding))
+    readonly property real widgetHeight: Math.max(20, 26 + SettingsData.topBarInnerPadding * 0.6)
 
     screen: modelData
-    implicitHeight: Theme.barHeight - 4 + SettingsData.topBarSpacing
+    implicitHeight: effectiveBarHeight + SettingsData.topBarSpacing
     color: "transparent"
     Component.onCompleted: {
         let fonts = Qt.fontFamilies()
@@ -153,7 +155,7 @@ PanelWindow {
         right: true
     }
 
-    exclusiveZone: autoHide ? -1 : Theme.barHeight - 4 + SettingsData.topBarSpacing
+    exclusiveZone: !SettingsData.topBarVisible || autoHide ? -1 : root.effectiveBarHeight + SettingsData.topBarSpacing - 2
 
     mask: Region {
         item: topBarMouseArea
@@ -161,7 +163,7 @@ PanelWindow {
 
     MouseArea {
         id: topBarMouseArea
-        height: root.reveal ? Theme.barHeight - 4 + SettingsData.topBarSpacing : 4
+        height: root.reveal ? effectiveBarHeight + SettingsData.topBarSpacing : 4
         anchors {
             top: parent.top
             left: parent.left
@@ -182,7 +184,7 @@ PanelWindow {
 
             transform: Translate {
                 id: topBarSlide
-                y: root.reveal ? 0 : -(Theme.barHeight - 8)
+                y: root.reveal ? 0 : -(effectiveBarHeight - 4)
 
                 Behavior on y {
                     NumberAnimation {
@@ -386,17 +388,17 @@ PanelWindow {
                     }
 
                     anchors.fill: parent
-                    anchors.leftMargin: Theme.spacingM
-                    anchors.rightMargin: Theme.spacingM
-                    anchors.topMargin: Theme.spacingXS
-                    anchors.bottomMargin: Theme.spacingXS
+                    anchors.leftMargin: Math.max(Theme.spacingXS, SettingsData.topBarInnerPadding * 0.8)
+                    anchors.rightMargin: Math.max(Theme.spacingXS, SettingsData.topBarInnerPadding * 0.8)
+                    anchors.topMargin: SettingsData.topBarInnerPadding / 2
+                    anchors.bottomMargin: SettingsData.topBarInnerPadding / 2
                     clip: true
 
                     Row {
                         id: leftSection
 
                         height: parent.height
-                        spacing: Theme.spacingXS
+                        spacing: SettingsData.topBarNoBackground ? 2 : Theme.spacingXS
                         anchors.left: parent.left
                         anchors.verticalCenter: parent.verticalCenter
 
@@ -426,7 +428,7 @@ PanelWindow {
                         property var centerWidgets: []
                         property int totalWidgets: 0
                         property real totalWidth: 0
-                        property real spacing: Theme.spacingS
+                        property real spacing: SettingsData.topBarNoBackground ? 2 : Theme.spacingS
 
                         function updateLayout() {
                             // Defer layout if dimensions are invalid
@@ -575,7 +577,7 @@ PanelWindow {
                         id: rightSection
 
                         height: parent.height
-                        spacing: Theme.spacingXS
+                        spacing: SettingsData.topBarNoBackground ? 2 : Theme.spacingXS
                         anchors.right: parent.right
                         anchors.verticalCenter: parent.verticalCenter
 
@@ -603,10 +605,12 @@ PanelWindow {
                         id: clipboardComponent
 
                         Rectangle {
-                            width: 40
-                            height: 30
-                            radius: Theme.cornerRadius
+                            readonly property real horizontalPadding: SettingsData.topBarNoBackground ? 0 : Math.max(Theme.spacingXS, Theme.spacingS * (root.widgetHeight / 30))
+                            width: clipboardIcon.width + horizontalPadding * 2
+                            height: root.widgetHeight
+                            radius: SettingsData.topBarNoBackground ? 0 : Theme.cornerRadius
                             color: {
+                                if (SettingsData.topBarNoBackground) return "transparent"
                                 const baseColor = clipboardArea.containsMouse ? Theme.primaryHover : Theme.secondaryHover
                                 return Qt.rgba(
                                             baseColor.r, baseColor.g,
@@ -615,6 +619,7 @@ PanelWindow {
                             }
 
                             DankIcon {
+                                id: clipboardIcon
                                 anchors.centerIn: parent
                                 name: "content_paste"
                                 size: Theme.iconSize - 6
@@ -646,6 +651,8 @@ PanelWindow {
 
                         LauncherButton {
                             isActive: false
+                            widgetHeight: root.widgetHeight
+                            barHeight: root.effectiveBarHeight
                             section: {
                                 if (parent && parent.parent) {
                                     if (parent.parent === leftSection)
@@ -672,6 +679,7 @@ PanelWindow {
 
                         WorkspaceSwitcher {
                             screenName: root.screenName
+                            widgetHeight: root.widgetHeight
                         }
                     }
 
@@ -680,6 +688,7 @@ PanelWindow {
 
                         FocusedApp {
                             availableWidth: topBarContent.leftToMediaGap
+                            widgetHeight: root.widgetHeight
                         }
                     }
 
@@ -687,6 +696,7 @@ PanelWindow {
                         id: runningAppsComponent
 
                         RunningApps {
+                            widgetHeight: root.widgetHeight
                             section: {
                                 if (parent && parent.parent === leftSection)
                                     return "left"
@@ -706,6 +716,8 @@ PanelWindow {
 
                         Clock {
                             compactMode: topBarContent.overlapping
+                            barHeight: root.effectiveBarHeight
+                            widgetHeight: root.widgetHeight
                             section: {
                                 if (parent && parent.parent === leftSection)
                                     return "left"
@@ -736,6 +748,8 @@ PanelWindow {
                         Media {
                             compactMode: topBarContent.spacingTight
                                          || topBarContent.overlapping
+                            barHeight: root.effectiveBarHeight
+                            widgetHeight: root.widgetHeight
                             section: {
                                 if (parent && parent.parent === leftSection)
                                     return "left"
@@ -764,6 +778,8 @@ PanelWindow {
                         id: weatherComponent
 
                         Weather {
+                            barHeight: root.effectiveBarHeight
+                            widgetHeight: root.widgetHeight
                             section: {
                                 if (parent && parent.parent === leftSection)
                                     return "left"
@@ -794,6 +810,7 @@ PanelWindow {
                         SystemTrayBar {
                             parentWindow: root
                             parentScreen: root.screen
+                            widgetHeight: root.widgetHeight
                         }
                     }
 
@@ -801,6 +818,7 @@ PanelWindow {
                         id: privacyIndicatorComponent
 
                         PrivacyIndicator {
+                            widgetHeight: root.widgetHeight
                             section: {
                                 if (parent && parent.parent === leftSection)
                                     return "left"
@@ -818,6 +836,8 @@ PanelWindow {
                         id: cpuUsageComponent
 
                         CpuMonitor {
+                            barHeight: root.effectiveBarHeight
+                            widgetHeight: root.widgetHeight
                             section: {
                                 if (parent && parent.parent === leftSection)
                                     return "left"
@@ -844,6 +864,8 @@ PanelWindow {
                         id: memUsageComponent
 
                         RamMonitor {
+                            barHeight: root.effectiveBarHeight
+                            widgetHeight: root.widgetHeight
                             section: {
                                 if (parent && parent.parent === leftSection)
                                     return "left"
@@ -870,6 +892,8 @@ PanelWindow {
                         id: cpuTempComponent
 
                         CpuTemperature {
+                            barHeight: root.effectiveBarHeight
+                            widgetHeight: root.widgetHeight
                             section: {
                                 if (parent && parent.parent === leftSection)
                                     return "left"
@@ -896,6 +920,8 @@ PanelWindow {
                         id: gpuTempComponent
 
                         GpuTemperature {
+                            barHeight: root.effectiveBarHeight
+                            widgetHeight: root.widgetHeight
                             section: {
                                 if (parent && parent.parent === leftSection)
                                     return "left"
@@ -925,6 +951,8 @@ PanelWindow {
                         NotificationCenterButton {
                             hasUnread: root.notificationCount > 0
                             isActive: notificationCenterLoader.item ? notificationCenterLoader.item.shouldBeVisible : false
+                            widgetHeight: root.widgetHeight
+                            barHeight: root.effectiveBarHeight
                             section: {
                                 if (parent && parent.parent === leftSection)
                                     return "left"
@@ -953,6 +981,8 @@ PanelWindow {
 
                         Battery {
                             batteryPopupVisible: batteryPopoutLoader.item ? batteryPopoutLoader.item.shouldBeVisible : false
+                            widgetHeight: root.widgetHeight
+                            barHeight: root.effectiveBarHeight
                             section: {
                                 if (parent && parent.parent === leftSection)
                                     return "left"
@@ -981,6 +1011,8 @@ PanelWindow {
 
                         ControlCenterButton {
                             isActive: controlCenterLoader.item ? controlCenterLoader.item.shouldBeVisible : false
+                            widgetHeight: root.widgetHeight
+                            barHeight: root.effectiveBarHeight
                             section: {
                                 if (parent && parent.parent === leftSection)
                                     return "left"
@@ -1023,6 +1055,7 @@ PanelWindow {
                         id: idleInhibitorComponent
 
                         IdleInhibitor {
+                            widgetHeight: root.widgetHeight
                             section: {
                                 if (parent && parent.parent === leftSection)
                                     return "left"
@@ -1041,7 +1074,7 @@ PanelWindow {
 
                         Item {
                             width: parent.spacerSize || 20
-                            height: 30
+                            height: root.widgetHeight
 
                             Rectangle {
                                 anchors.fill: parent
@@ -1068,7 +1101,7 @@ PanelWindow {
 
                         Rectangle {
                             width: 1
-                            height: 20
+                            height: root.widgetHeight * 0.67
                             color: Theme.outline
                             opacity: 0.3
                         }

@@ -9,6 +9,7 @@ import qs.Widgets
 Item {
     id: root
 
+    clip: false
     property var appData
     property var contextMenu: null
     property var dockApps: null
@@ -23,6 +24,16 @@ Item {
     property string windowTitle: ""
     property bool isHovered: mouseArea.containsMouse && !dragging
     property bool showTooltip: mouseArea.containsMouse && !dragging
+    property bool isWindowFocused: {
+        if (!appData || appData.type !== "window") {
+            return false
+        }
+        var toplevel = getToplevelObject()
+        if (!toplevel) {
+            return false
+        }
+        return toplevel.activated
+    }
     property string tooltipText: {
         if (!appData)
             return ""
@@ -45,6 +56,35 @@ Item {
 
     width: 40
     height: 40
+    
+    function getToplevelObject() {
+        if (!appData || appData.type !== "window") {
+            return null
+        }
+        
+        var sortedToplevels = CompositorService.sortedToplevels
+        if (!sortedToplevels) {
+            return null
+        }
+
+        if (appData.uniqueId) {
+            for (var i = 0; i < sortedToplevels.length; i++) {
+                var toplevel = sortedToplevels[i]
+                var checkId = toplevel.title + "|" + (toplevel.appId || "") + "|" + i
+                if (checkId === appData.uniqueId) {
+                    return toplevel
+                }
+            }
+        }
+
+        if (appData.windowId !== undefined && appData.windowId !== null && appData.windowId >= 0) {
+            if (appData.windowId < sortedToplevels.length) {
+                return sortedToplevels[appData.windowId]
+            }
+        }
+        
+        return null
+    }
     onIsHoveredChanged: {
         if (isHovered) {
             exitAnimation.stop()
@@ -198,13 +238,12 @@ Item {
                                                                        "comment": desktopEntry.comment || ""
                                                                    })
 
-                                   Quickshell.execDetached(
-                                       ["gtk-launch", appData.appId])
+                                   desktopEntry.execute()
                                }
                            } else if (appData.type === "window") {
-                               // Focus the specific window using toplevel
-                               if (appData.toplevelObject) {
-                                   appData.toplevelObject.activate()
+                               var toplevel = getToplevelObject()
+                               if (toplevel) {
+                                   toplevel.activate()
                                }
                            }
                        } else if (mouse.button === Qt.MiddleButton) {
@@ -224,8 +263,7 @@ Item {
                                                                               || ""
                                                                })
 
-                               Quickshell.execDetached(
-                                   ["gtk-launch", appData.appId])
+                                 desktopEntry.execute()
                            }
                        } else if (mouse.button === Qt.RightButton) {
                            if (contextMenu)
@@ -237,9 +275,8 @@ Item {
     IconImage {
         id: iconImg
 
-        width: 40
-        height: 40
         anchors.centerIn: parent
+        implicitSize: 40
         source: {
             if (!appData || !appData.appId)
                 return ""
@@ -253,18 +290,17 @@ Item {
             }
             return ""
         }
-        smooth: true
         mipmap: true
+        smooth: true
         asynchronous: true
         visible: status === Image.Ready
-        implicitSize: 40
     }
 
     Rectangle {
         width: 40
         height: 40
         anchors.centerIn: parent
-        visible: !iconImg.visible
+        visible: iconImg.status !== Image.Ready
         color: Theme.surfaceLight
         radius: Theme.cornerRadius
         border.width: 1
@@ -302,7 +338,7 @@ Item {
                 return "transparent"
 
             // For window type, check if focused using reactive property
-            if (appData.type === "window" && appData.toplevelObject && appData.toplevelObject.activated)
+            if (isWindowFocused)
                 return Theme.primary
 
             // For running apps, show dimmer indicator

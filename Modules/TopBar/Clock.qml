@@ -11,13 +11,17 @@ Rectangle {
     property string section: "center"
     property var popupTarget: null
     property var parentScreen: null
+    property real barHeight: 48
+    property real widgetHeight: 30
+    readonly property real horizontalPadding: SettingsData.topBarNoBackground ? 2 : Theme.spacingS
 
     signal clockClicked
 
-    width: clockRow.implicitWidth + Theme.spacingS * 2
-    height: 30
-    radius: Theme.cornerRadius
+    width: clockRow.implicitWidth + horizontalPadding * 2
+    height: widgetHeight
+    radius: SettingsData.topBarNoBackground ? 0 : Theme.cornerRadius
     color: {
+        if (SettingsData.topBarNoBackground) return "transparent"
         const baseColor = clockMouseArea.containsMouse ? Theme.primaryHover : Theme.surfaceTextHover
         return Qt.rgba(baseColor.r, baseColor.g, baseColor.b,
                        baseColor.a * Theme.widgetTransparency)
@@ -79,7 +83,7 @@ Rectangle {
                 var screenX = currentScreen.x || 0
                 var relativeX = globalPos.x - screenX
                 popupTarget.setTriggerPosition(
-                            relativeX, Theme.barHeight + Theme.spacingXS,
+                            relativeX, barHeight + Theme.spacingXS,
                             width, section, currentScreen)
             }
             root.clockClicked()

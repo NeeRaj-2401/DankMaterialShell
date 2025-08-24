@@ -83,8 +83,11 @@ Singleton {
     property real cornerRadius: 12
     property bool notificationOverlayEnabled: false
     property bool topBarAutoHide: false
+    property bool topBarVisible: true
     property real topBarSpacing: 4
+    property real topBarInnerPadding: 8
     property bool topBarSquareCorners: false
+    property bool topBarNoBackground: false
     property int notificationTimeoutLow: 5000
     property int notificationTimeoutNormal: 5000
     property int notificationTimeoutCritical: 0
@@ -266,6 +269,8 @@ Singleton {
                         !== undefined ? settings.notificationOverlayEnabled : false
                 topBarAutoHide = settings.topBarAutoHide
                         !== undefined ? settings.topBarAutoHide : false
+                topBarVisible = settings.topBarVisible
+                        !== undefined ? settings.topBarVisible : true
                 notificationTimeoutLow = settings.notificationTimeoutLow
                         !== undefined ? settings.notificationTimeoutLow : 5000
                 notificationTimeoutNormal = settings.notificationTimeoutNormal
@@ -273,8 +278,11 @@ Singleton {
                 notificationTimeoutCritical = settings.notificationTimeoutCritical
                         !== undefined ? settings.notificationTimeoutCritical : 0
                 topBarSpacing = settings.topBarSpacing !== undefined ? settings.topBarSpacing : 4
+                topBarInnerPadding = settings.topBarInnerPadding !== undefined ? settings.topBarInnerPadding : 8
                 topBarSquareCorners = settings.topBarSquareCorners
                         !== undefined ? settings.topBarSquareCorners : false
+                topBarNoBackground = settings.topBarNoBackground
+                        !== undefined ? settings.topBarNoBackground : false
                 applyStoredTheme()
                 detectAvailableIconThemes()
                 detectQtTools()
@@ -354,8 +362,11 @@ Singleton {
                                                 "cornerRadius": cornerRadius,
                                                 "notificationOverlayEnabled": notificationOverlayEnabled,
                                                 "topBarAutoHide": topBarAutoHide,
+                                                "topBarVisible": topBarVisible,
                                                 "topBarSpacing": topBarSpacing,
+                                                "topBarInnerPadding": topBarInnerPadding,
                                                 "topBarSquareCorners": topBarSquareCorners,
+                                                "topBarNoBackground": topBarNoBackground,
                                                 "notificationTimeoutLow": notificationTimeoutLow,
                                                 "notificationTimeoutNormal": notificationTimeoutNormal,
                                                 "notificationTimeoutCritical": notificationTimeoutCritical
@@ -855,6 +866,16 @@ Singleton {
         saveSettings()
     }
 
+    function setTopBarVisible(visible) {
+        topBarVisible = visible
+        saveSettings()
+    }
+
+    function toggleTopBarVisible() {
+        topBarVisible = !topBarVisible
+        saveSettings()
+    }
+
     function setNotificationTimeoutLow(timeout) {
         notificationTimeoutLow = timeout
         saveSettings()
@@ -875,8 +896,18 @@ Singleton {
         saveSettings()
     }
 
+    function setTopBarInnerPadding(padding) {
+        topBarInnerPadding = padding
+        saveSettings()
+    }
+
     function setTopBarSquareCorners(enabled) {
         topBarSquareCorners = enabled
+        saveSettings()
+    }
+
+    function setTopBarNoBackground(enabled) {
+        topBarNoBackground = enabled
         saveSettings()
     }
 
@@ -1001,5 +1032,28 @@ Singleton {
                 }
             }
         }
+    }
+
+    IpcHandler {
+        function show() {
+            root.setTopBarVisible(true)
+            return "BAR_SHOW_SUCCESS"
+        }
+
+        function hide() {
+            root.setTopBarVisible(false)
+            return "BAR_HIDE_SUCCESS"
+        }
+
+        function toggle() {
+            root.toggleTopBarVisible()
+            return topBarVisible ? "BAR_SHOW_SUCCESS" : "BAR_HIDE_SUCCESS"
+        }
+
+        function status() {
+            return topBarVisible ? "visible" : "hidden"
+        }
+
+        target: "bar"
     }
 }

@@ -554,6 +554,71 @@ Item {
                 }
             }
 
+            // Manual Visibility Toggle
+            StyledRect {
+                width: parent.width
+                height: topBarVisibilitySection.implicitHeight + Theme.spacingL * 2
+                radius: Theme.cornerRadius
+                color: Qt.rgba(Theme.surfaceVariant.r, Theme.surfaceVariant.g,
+                               Theme.surfaceVariant.b, 0.3)
+                border.color: Qt.rgba(Theme.outline.r, Theme.outline.g,
+                                      Theme.outline.b, 0.2)
+                border.width: 1
+
+                Column {
+                    id: topBarVisibilitySection
+
+                    anchors.fill: parent
+                    anchors.margins: Theme.spacingL
+                    spacing: Theme.spacingM
+
+                    Row {
+                        width: parent.width
+                        spacing: Theme.spacingM
+
+                        DankIcon {
+                            name: "visibility"
+                            size: Theme.iconSize
+                            color: Theme.primary
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+
+                        Column {
+                            width: parent.width - Theme.iconSize - Theme.spacingM
+                                   - visibilityToggle.width - Theme.spacingM
+                            spacing: Theme.spacingXS
+                            anchors.verticalCenter: parent.verticalCenter
+
+                            StyledText {
+                                text: "Manual Show/Hide"
+                                font.pixelSize: Theme.fontSizeLarge
+                                font.weight: Font.Medium
+                                color: Theme.surfaceText
+                            }
+
+                            StyledText {
+                                text: "Toggle top bar visibility manually (can be controlled via IPC)"
+                                font.pixelSize: Theme.fontSizeSmall
+                                color: Theme.surfaceVariantText
+                                wrapMode: Text.WordWrap
+                                width: parent.width
+                            }
+                        }
+
+                        DankToggle {
+                            id: visibilityToggle
+
+                            anchors.verticalCenter: parent.verticalCenter
+                            checked: SettingsData.topBarVisible
+                            onToggled: toggled => {
+                                           return SettingsData.setTopBarVisible(
+                                               toggled)
+                                       }
+                        }
+                    }
+                }
+            }
+
             // Spacing
             StyledRect {
                 width: parent.width
@@ -597,7 +662,7 @@ Item {
                         spacing: Theme.spacingS
 
                         StyledText {
-                            text: "Gap Around Top Bar (0 = edge-to-edge)"
+                            text: "Top/Left/Right Gaps (0 = edge-to-edge)"
                             font.pixelSize: Theme.fontSizeSmall
                             color: Theme.surfaceText
                             font.weight: Font.Medium
@@ -618,13 +683,76 @@ Item {
                         }
                     }
 
+                    Column {
+                        width: parent.width
+                        spacing: Theme.spacingS
+
+                        StyledText {
+                            text: "Size"
+                            font.pixelSize: Theme.fontSizeSmall
+                            color: Theme.surfaceText
+                            font.weight: Font.Medium
+                        }
+
+                        DankSlider {
+                            width: parent.width
+                            height: 24
+                            value: SettingsData.topBarInnerPadding
+                            minimum: 0
+                            maximum: 24
+                            unit: ""
+                            showValue: true
+                            onSliderValueChanged: newValue => {
+                                                      SettingsData.setTopBarInnerPadding(
+                                                          newValue)
+                                                  }
+                        }
+                    }
+
+                    Column {
+                        width: parent.width
+                        spacing: Theme.spacingS
+
+                        StyledText {
+                            text: "Corner Radius (0 = square corners)"
+                            font.pixelSize: Theme.fontSizeSmall
+                            color: Theme.surfaceText
+                            font.weight: Font.Medium
+                        }
+
+                        DankSlider {
+                            width: parent.width
+                            height: 24
+                            value: SettingsData.cornerRadius
+                            minimum: 0
+                            maximum: 32
+                            unit: ""
+                            showValue: true
+                            onSliderValueChanged: newValue => {
+                                                      SettingsData.setCornerRadius(
+                                                          newValue)
+                                                  }
+                        }
+                    }
+
                     DankToggle {
                         width: parent.width
                         text: "Square Corners"
-                        description: "Disable corner radius for the top bar (always square corners)"
+                        description: "Removes rounded corners from bar container."
                         checked: SettingsData.topBarSquareCorners
                         onToggled: checked => {
                                        SettingsData.setTopBarSquareCorners(
+                                           checked)
+                                   }
+                    }
+
+                    DankToggle {
+                        width: parent.width
+                        text: "No Background"
+                        description: "Remove widget backgrounds for a minimal look with tighter spacing."
+                        checked: SettingsData.topBarNoBackground
+                        onToggled: checked => {
+                                       SettingsData.setTopBarNoBackground(
                                            checked)
                                    }
                     }

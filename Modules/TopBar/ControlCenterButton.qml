@@ -15,14 +15,18 @@ Rectangle {
     property bool showNetworkIcon: SettingsData.controlCenterShowNetworkIcon
     property bool showBluetoothIcon: SettingsData.controlCenterShowBluetoothIcon
     property bool showAudioIcon: SettingsData.controlCenterShowAudioIcon
+    property real widgetHeight: 30
+    property real barHeight: 48
+    readonly property real horizontalPadding: SettingsData.topBarNoBackground ? 0 : Math.max(Theme.spacingXS, Theme.spacingS * (widgetHeight / 30))
 
     signal clicked
     signal iconClicked(string tab)
 
-    width: controlIndicators.implicitWidth + Theme.spacingS * 2
-    height: 30
-    radius: Theme.cornerRadius
+    width: controlIndicators.implicitWidth + horizontalPadding * 2
+    height: widgetHeight
+    radius: SettingsData.topBarNoBackground ? 0 : Theme.cornerRadius
     color: {
+        if (SettingsData.topBarNoBackground) return "transparent"
         const baseColor = controlCenterArea.containsMouse
                         || root.isActive ? Theme.primaryPressed : Theme.secondaryHover
         return Qt.rgba(baseColor.r, baseColor.g, baseColor.b,
@@ -143,7 +147,7 @@ Rectangle {
                 var screenX = currentScreen.x || 0
                 var relativeX = globalPos.x - screenX
                 popupTarget.setTriggerPosition(
-                            relativeX, Theme.barHeight + Theme.spacingXS,
+                            relativeX, barHeight + Theme.spacingXS,
                             width, section, currentScreen)
             }
 

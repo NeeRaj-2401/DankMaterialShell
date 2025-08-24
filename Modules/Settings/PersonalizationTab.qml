@@ -83,7 +83,7 @@ Item {
     Component.onCompleted: {
         // Access services to ensure they're initialized
         WallpaperCyclingService.cyclingActive
-        NightModeAutomationService.automationActive
+        DisplayService.automationActive
         if (!fontsEnumerated) {
             enumerateFonts()
             fontsEnumerated = true
@@ -693,24 +693,24 @@ Item {
                             else
                                 return "Apply warm color temperature to reduce eye strain"
                         }
-                        checked: BrightnessService.nightModeActive
+                        checked: DisplayService.nightModeActive
                         enabled: !SessionData.nightModeAutoEnabled
                         opacity: enabled ? 1.0 : 0.6
                         onToggled: checked => {
-                                       if (checked !== BrightnessService.nightModeActive) {
+                                       if (checked !== DisplayService.nightModeActive) {
                                            if (checked)
-                                           BrightnessService.enableNightMode()
+                                           DisplayService.enableNightMode()
                                            else
-                                           BrightnessService.disableNightMode()
+                                           DisplayService.disableNightMode()
                                        }
                                    }
 
                         Connections {
                             function onNightModeActiveChanged() {
-                                nightModeToggle.checked = BrightnessService.nightModeActive
+                                nightModeToggle.checked = DisplayService.nightModeActive
                             }
 
-                            target: BrightnessService
+                            target: DisplayService
                         }
                     }
 
@@ -720,12 +720,12 @@ Item {
                         description: {
                             if (SessionData.nightModeAutoEnabled)
                                 return "Temperature controlled by automatic scheduling"
-                            else if (BrightnessService.nightModeActive)
+                            else if (DisplayService.nightModeActive)
                                 return "Disable night mode to adjust"
                             else
                                 return "Set temperature for night mode"
                         }
-                        enabled: !BrightnessService.nightModeActive && !SessionData.nightModeAutoEnabled
+                        enabled: !DisplayService.nightModeActive && !SessionData.nightModeAutoEnabled
                         opacity: enabled ? 1 : 0.6
                         currentValue: SessionData.nightModeTemperature + "K"
                         options: {
@@ -821,8 +821,8 @@ Item {
                                     height: 32
                                     model: [
                                         { "text": "Manual", "enabled": true },
-                                        { "text": "Time", "enabled": NightModeAutomationService.gammaStepAvailable },
-                                        { "text": "Location", "enabled": NightModeAutomationService.gammaStepAvailable }
+                                        { "text": "Time", "enabled": DisplayService.gammaStepAvailable },
+                                        { "text": "Location", "enabled": DisplayService.gammaStepAvailable }
                                     ]
                                     currentIndex: {
                                         switch(SessionData.nightModeAutoMode) {
@@ -833,7 +833,7 @@ Item {
                                     }
                                     onTabClicked: index => {
                                                       // Don't allow clicking disabled tabs
-                                                      if (index > 0 && !NightModeAutomationService.gammaStepAvailable) return
+                                                      if (index > 0 && !DisplayService.gammaStepAvailable) return
                                                       
                                                       let mode = "manual"
                                                       switch(index) {
@@ -950,12 +950,12 @@ Item {
                                 }
 
                                 StyledText {
-                                    text: !NightModeAutomationService.gammaStepAvailable ? 
+                                    text: !DisplayService.gammaStepAvailable ? 
                                           "⚠ Night mode not supported - display does not support gamma adjustment or gammastep not detected" :
                                           "⚠ gammastep not detected - automatic scheduling unavailable"
                                     font.pixelSize: Theme.fontSizeSmall
                                     color: Theme.error
-                                    visible: !NightModeAutomationService.gammaStepAvailable
+                                    visible: !DisplayService.gammaStepAvailable
                                     width: parent.width
                                     wrapMode: Text.WordWrap
                                 }
@@ -964,7 +964,7 @@ Item {
                                     text: "⚠ geoclue2 not detected - location services may not work properly. You can still use time-based scheduling."
                                     font.pixelSize: Theme.fontSizeSmall
                                     color: Theme.surfaceVariantText
-                                    visible: NightModeAutomationService.gammaStepAvailable && !NightModeAutomationService.geoClue2Available
+                                    visible: DisplayService.gammaStepAvailable && !DisplayService.geoClue2Available
                                     width: parent.width
                                     wrapMode: Text.WordWrap
                                 }
@@ -973,18 +973,18 @@ Item {
                                     text: "✓ Location-based night mode ready"
                                     font.pixelSize: Theme.fontSizeSmall
                                     color: Theme.primary
-                                    visible: NightModeAutomationService.gammaStepAvailable && NightModeAutomationService.geoClue2Available
+                                    visible: DisplayService.gammaStepAvailable && DisplayService.geoClue2Available
                                     width: parent.width
                                 }
                             }
 
                             // Status for time mode
                             StyledText {
-                                text: SessionData.nightModeAutoMode === "time" && !NightModeAutomationService.gammaStepAvailable ? 
+                                text: SessionData.nightModeAutoMode === "time" && !DisplayService.gammaStepAvailable ? 
                                       "⚠ gammastep not detected - automatic scheduling unavailable" : ""
                                 font.pixelSize: Theme.fontSizeSmall
                                 color: Theme.error
-                                visible: SessionData.nightModeAutoMode === "time" && !NightModeAutomationService.gammaStepAvailable
+                                visible: SessionData.nightModeAutoMode === "time" && !DisplayService.gammaStepAvailable
                                 width: parent.width - parent.leftPadding
                                 wrapMode: Text.WordWrap
                             }

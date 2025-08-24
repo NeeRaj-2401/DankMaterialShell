@@ -51,9 +51,9 @@ qs -c dms ipc call audio mute
 
 ## Target: `brightness`
 
-Display brightness control for internal and external displays.
+Display brightness control and night mode functionality.
 
-### Functions
+### Brightness Functions
 
 **`set <percentage> [device]`**
 - Set brightness to specific percentage (1-100)
@@ -84,45 +84,85 @@ Display brightness control for internal and external displays.
 - List all available brightness devices
 - Returns: Device names and classes
 
-### Examples
-```bash
-qs -c dms ipc call brightness set 80
-qs -c dms ipc call brightness increment 10 ""
-qs -c dms ipc call brightness decrement 5 "intel_backlight"
-```
+### Night Mode Functions
 
-## Target: `night`
-
-Night mode (gamma/color temperature) control.
-
-### Functions
-
-**`toggle`**
+**`night_mode_toggle`**
 - Toggle night mode on/off
 - Returns: Current night mode state
 
-**`enable`**
+**`night_mode_enable`**
 - Enable night mode
 - Returns: Confirmation message
 
-**`disable`** 
+**`night_mode_disable`** 
 - Disable night mode
 - Returns: Confirmation message
 
-**`status`**
+**`night_mode_status`**
 - Get current night mode status
-- Returns: Night mode enabled/disabled state
+- Returns: Night mode enabled/disabled or automation status
 
-**`temperature [value]`**
+**`night_mode_temperature [value]`**
 - Get or set night mode color temperature
 - Parameters:
   - `value` - Optional temperature in Kelvin (2500-6000, steps of 500)
 - Returns: Current or newly set temperature
 
+### Night Mode Automation Functions
+
+**`night_mode_automation_enable <mode>`**
+- Enable night mode automation
+- Parameters:
+  - `mode` - Automation mode ("time" or "location")
+- Returns: Confirmation message
+
+**`night_mode_automation_disable`**
+- Disable night mode automation
+- Returns: Confirmation message
+
+**`night_mode_automation_status`**
+- Get current automation status
+- Returns: Automation enabled/disabled state and mode
+
+### Diagnostic Functions
+
+**`gamma_status`**
+- Check gamma adjustment support status
+- Returns: Availability of gammastep, geoclue2, and current states
+
+**`debug_time_status`**
+- Debug time-based automation logic
+- Returns: Current time, night period, and timer status
+
+**`test_gamma_support`**
+- Test gamma adjustment compatibility
+- Returns: Runs compatibility tests and logs results
+
+**`test_manual_gamma <temperature>`**
+- Test manual gamma adjustment with specific temperature
+- Parameters: `temperature` - Color temperature in Kelvin (1000-10000)
+- Returns: Runs one-shot gamma test and logs results
+
 ### Examples
 ```bash
-qs -c dms ipc call night toggle
-qs -c dms ipc call night temperature 4000
+# Brightness control (unchanged for compatibility)
+qs -c dms ipc call brightness set 80
+qs -c dms ipc call brightness increment 10 ""
+qs -c dms ipc call brightness decrement 5 "intel_backlight"
+
+# Night mode control
+qs -c dms ipc call brightness night_mode_toggle
+qs -c dms ipc call brightness night_mode_temperature 4000
+
+# Night mode automation
+qs -c dms ipc call brightness night_mode_automation_enable time
+qs -c dms ipc call brightness night_mode_automation_disable
+
+# Diagnostic commands
+qs -c dms ipc call brightness gamma_status
+qs -c dms ipc call brightness debug_time_status
+qs -c dms ipc call brightness test_gamma_support
+qs -c dms ipc call brightness test_manual_gamma 4000
 ```
 
 ## Target: `mpris`
@@ -373,9 +413,9 @@ IPC commands can be used in scripts for automation:
 # Toggle night mode based on time of day
 hour=$(date +%H)
 if [ $hour -ge 20 ] || [ $hour -le 6 ]; then
-    qs -c dms ipc call night enable
+    qs -c dms ipc call brightness night_mode_enable
 else
-    qs -c dms ipc call night disable
+    qs -c dms ipc call brightness night_mode_disable
 fi
 ```
 

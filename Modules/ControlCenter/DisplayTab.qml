@@ -43,7 +43,7 @@ Item {
         Column {
             width: parent.width
             spacing: Theme.spacingS
-            visible: BrightnessService.brightnessAvailable
+            visible: DisplayService.brightnessAvailable
 
             StyledText {
                 text: "Brightness"
@@ -56,20 +56,20 @@ Item {
                 id: deviceDropdown
                 width: parent.width
                 height: 40
-                visible: BrightnessService.devices.length > 1
+                visible: DisplayService.devices.length > 1
                 text: "Device"
                 description: {
-                    const deviceInfo = BrightnessService.getCurrentDeviceInfo()
+                    const deviceInfo = DisplayService.getCurrentDeviceInfo()
                     if (deviceInfo && deviceInfo.class === "ddc") {
                         return "DDC changes can be slow and unreliable"
                     }
                     return ""
                 }
-                currentValue: BrightnessService.currentDevice
-                options: BrightnessService.devices.map(function (d) {
+                currentValue: DisplayService.currentDevice
+                options: DisplayService.devices.map(function (d) {
                     return d.name
                 })
-                optionIcons: BrightnessService.devices.map(function (d) {
+                optionIcons: DisplayService.devices.map(function (d) {
                     if (d.class === "backlight")
                         return "desktop_windows"
 
@@ -82,26 +82,26 @@ Item {
                     return "lightbulb"
                 })
                 onValueChanged: function (value) {
-                    BrightnessService.setCurrentDevice(value, true)
+                    DisplayService.setCurrentDevice(value, true)
                 }
 
                 Connections {
-                    target: BrightnessService
+                    target: DisplayService
                     function onDevicesChanged() {
-                        if (BrightnessService.currentDevice) {
-                            deviceDropdown.currentValue = BrightnessService.currentDevice
+                        if (DisplayService.currentDevice) {
+                            deviceDropdown.currentValue = DisplayService.currentDevice
                         }
 
                         // Check if saved device is now available
                         const lastDevice = SessionData.lastBrightnessDevice
                                          || ""
                         if (lastDevice) {
-                            const deviceExists = BrightnessService.devices.some(
+                            const deviceExists = DisplayService.devices.some(
                                                    d => d.name === lastDevice)
                             if (deviceExists
-                                    && (!BrightnessService.currentDevice
-                                        || BrightnessService.currentDevice !== lastDevice)) {
-                                BrightnessService.setCurrentDevice(lastDevice,
+                                    && (!DisplayService.currentDevice
+                                        || DisplayService.currentDevice !== lastDevice)) {
+                                DisplayService.setCurrentDevice(lastDevice,
                                                                    false)
                             }
                         }
@@ -109,7 +109,7 @@ Item {
                     function onDeviceSwitched() {
                         // Force update the description when device switches
                         deviceDropdown.description = Qt.binding(function () {
-                            const deviceInfo = BrightnessService.getCurrentDeviceInfo()
+                            const deviceInfo = DisplayService.getCurrentDeviceInfo()
                             if (deviceInfo && deviceInfo.class === "ddc") {
                                 return "DDC changes can be slow and unreliable"
                             }
@@ -122,30 +122,30 @@ Item {
             DankSlider {
                 id: brightnessSlider
                 width: parent.width
-                value: BrightnessService.brightnessLevel
+                value: DisplayService.brightnessLevel
                 leftIcon: "brightness_low"
                 rightIcon: "brightness_high"
-                enabled: BrightnessService.brightnessAvailable
-                         && BrightnessService.isCurrentDeviceReady()
-                opacity: BrightnessService.isCurrentDeviceReady() ? 1.0 : 0.5
+                enabled: DisplayService.brightnessAvailable
+                         && DisplayService.isCurrentDeviceReady()
+                opacity: DisplayService.isCurrentDeviceReady() ? 1.0 : 0.5
                 onSliderValueChanged: function (newValue) {
                     brightnessDebounceTimer.pendingValue = newValue
                     brightnessDebounceTimer.restart()
                 }
                 onSliderDragFinished: function (finalValue) {
                     brightnessDebounceTimer.stop()
-                    BrightnessService.setBrightnessInternal(
-                                finalValue, BrightnessService.currentDevice)
+                    DisplayService.setBrightnessInternal(
+                                finalValue, DisplayService.currentDevice)
                 }
 
                 Connections {
-                    target: BrightnessService
+                    target: DisplayService
                     function onBrightnessChanged() {
-                        brightnessSlider.value = BrightnessService.brightnessLevel
+                        brightnessSlider.value = DisplayService.brightnessLevel
                     }
 
                     function onDeviceSwitched() {
-                        brightnessSlider.value = BrightnessService.brightnessLevel
+                        brightnessSlider.value = DisplayService.brightnessLevel
                     }
                 }
             }
@@ -174,22 +174,22 @@ Item {
                     width: (parent.width - Theme.spacingM) / 2
                     height: 80
                     radius: Theme.cornerRadius
-                    color: BrightnessService.nightModeActive ? Qt.rgba(
+                    color: DisplayService.nightModeActive ? Qt.rgba(
                                                                    Theme.primary.r,
                                                                    Theme.primary.g,
                                                                    Theme.primary.b,
                                                                    0.12) : (nightModeToggle.containsMouse && !SessionData.nightModeAutoEnabled ? Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.08) : Qt.rgba(Theme.surfaceVariant.r, Theme.surfaceVariant.g, Theme.surfaceVariant.b, SessionData.nightModeAutoEnabled ? 0.04 : 0.08))
-                    border.color: BrightnessService.nightModeActive ? Theme.primary : "transparent"
-                    border.width: BrightnessService.nightModeActive ? 1 : 0
+                    border.color: DisplayService.nightModeActive ? Theme.primary : "transparent"
+                    border.width: DisplayService.nightModeActive ? 1 : 0
 
                     Column {
                         anchors.centerIn: parent
                         spacing: Theme.spacingS
 
                         DankIcon {
-                            name: BrightnessService.nightModeActive ? "nightlight" : "dark_mode"
+                            name: DisplayService.nightModeActive ? "nightlight" : "dark_mode"
                             size: Theme.iconSizeLarge
-                            color: BrightnessService.nightModeActive ? Theme.primary : Theme.surfaceText
+                            color: DisplayService.nightModeActive ? Theme.primary : Theme.surfaceText
                             opacity: SessionData.nightModeAutoEnabled ? 0.6 : 1.0
                             anchors.horizontalCenter: parent.horizontalCenter
                         }
@@ -197,7 +197,7 @@ Item {
                         StyledText {
                             text: "Night Mode"
                             font.pixelSize: Theme.fontSizeMedium
-                            color: BrightnessService.nightModeActive ? Theme.primary : Theme.surfaceText
+                            color: DisplayService.nightModeActive ? Theme.primary : Theme.surfaceText
                             opacity: SessionData.nightModeAutoEnabled ? 0.6 : 1.0
                             font.weight: Font.Medium
                             anchors.horizontalCenter: parent.horizontalCenter
@@ -214,7 +214,7 @@ Item {
                             if (SessionData.nightModeAutoEnabled) {
                                 ToastService.showWarning("Night Mode is controlled by automation \nDisable scheduled Night Mode in Settings")
                             } else {
-                                BrightnessService.toggleNightMode()
+                                DisplayService.toggleNightMode()
                             }
                         }
                     }
@@ -282,13 +282,13 @@ Item {
 
         interval: {
             // Use longer interval for DDC devices since ddcutil is slow
-            const deviceInfo = BrightnessService.getCurrentDeviceInfo()
+            const deviceInfo = DisplayService.getCurrentDeviceInfo()
             return (deviceInfo && deviceInfo.class === "ddc") ? 100 : 50
         }
         repeat: false
         onTriggered: {
-            BrightnessService.setBrightnessInternal(
-                        pendingValue, BrightnessService.currentDevice)
+            DisplayService.setBrightnessInternal(
+                        pendingValue, DisplayService.currentDevice)
         }
     }
 }
